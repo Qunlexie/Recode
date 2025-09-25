@@ -61,40 +61,6 @@ def get_problem_counts():
     }
 
 
-def run_code_test(code_snippet):
-    """Run a code snippet and return results."""
-    try:
-        # Create a temporary file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(code_snippet)
-            temp_file = f.name
-        
-        # Run the code
-        result = subprocess.run([sys.executable, temp_file], 
-                              capture_output=True, text=True, timeout=10)
-        
-        # Clean up
-        os.unlink(temp_file)
-        
-        return {
-            'success': result.returncode == 0,
-            'output': result.stdout,
-            'error': result.stderr if result.stderr else None
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            'success': False,
-            'output': '',
-            'error': 'Code execution timed out (10 seconds)'
-        }
-    except Exception as e:
-        return {
-            'success': False,
-            'output': '',
-            'error': str(e)
-        }
-
-
 def is_valid_python(code: str) -> bool:
     """Check if Python code is syntactically valid."""
     try:
@@ -298,95 +264,8 @@ def render_question(question_data, practice_mode, enable_formatting=True):
         render_flashcard(question_data, enable_formatting)
     elif practice_mode == 'Fill in the Blanks':
         render_enhanced_fill_blanks(question_data)  # Use enhanced version
-    elif practice_mode == 'Multiple Choice':
-        render_multiple_choice_auto(question_data)
     else:
         render_flashcard(question_data, enable_formatting)  # Default fallback
-
-
-def generate_multiple_choice_questions(answer_text):
-    """Generate multiple choice questions from flashcard answer."""
-    import re
-    
-    # Try to extract time complexity
-    time_complexity = None
-    time_match = re.search(r'Time[:\s]*O\(([^)]+)\)', answer_text, re.IGNORECASE)
-    if time_match:
-        time_complexity = time_match.group(1)
-    
-    # Try to extract space complexity
-    space_complexity = None
-    space_match = re.search(r'Space[:\s]*O\(([^)]+)\)', answer_text, re.IGNORECASE)
-    if space_match:
-        space_complexity = space_match.group(1)
-    
-    # Determine algorithm approach based on keywords
-    approach = 'Hash Map / Dictionary'  # default
-    if 'two pointer' in answer_text.lower() or 'left' in answer_text.lower() and 'right' in answer_text.lower():
-        approach = 'Two Pointers'
-    elif 'dynamic programming' in answer_text.lower() or 'dp' in answer_text.lower():
-        approach = 'Dynamic Programming'
-    elif 'binary search' in answer_text.lower():
-        approach = 'Binary Search'
-    elif 'stack' in answer_text.lower():
-        approach = 'Stack'
-    elif 'queue' in answer_text.lower():
-        approach = 'Queue'
-    elif 'tree' in answer_text.lower() or 'node' in answer_text.lower():
-        approach = 'Tree'
-    elif 'graph' in answer_text.lower() or 'bfs' in answer_text.lower() or 'dfs' in answer_text.lower():
-        approach = 'Graph'
-    
-    # Generate questions based on what we found
-    if time_complexity:
-        time_options = ['O(1)', 'O(n)', 'O(n log n)', 'O(n²)', 'O(2^n)']
-        try:
-            correct_idx = time_options.index(f'O({time_complexity})')
-        except ValueError:
-            correct_idx = 1  # default to O(n)
-        
-        return {
-            'question': 'What is the time complexity of this algorithm?',
-            'options': time_options,
-            'correct': correct_idx,
-            'explanation': f'The algorithm has O({time_complexity}) time complexity as stated in the solution.'
-        }
-    
-    elif space_complexity:
-        space_options = ['O(1)', 'O(n)', 'O(log n)', 'O(n²)', 'O(2^n)']
-        try:
-            correct_idx = space_options.index(f'O({space_complexity})')
-        except ValueError:
-            correct_idx = 1  # default to O(n)
-        
-        return {
-            'question': 'What is the space complexity of this algorithm?',
-            'options': space_options,
-            'correct': correct_idx,
-            'explanation': f'The algorithm has O({space_complexity}) space complexity as stated in the solution.'
-        }
-    
-    else:
-        # Algorithm approach question
-        approach_options = ['Brute Force', 'Hash Map / Dictionary', 'Two Pointers', 'Dynamic Programming', 'Binary Search']
-        approach_map = {
-            'Hash Map / Dictionary': 1,
-            'Two Pointers': 2,
-            'Dynamic Programming': 3,
-            'Binary Search': 4,
-            'Stack': 0,  # fallback to Brute Force
-            'Queue': 0,
-            'Tree': 0,
-            'Graph': 0
-        }
-        correct_idx = approach_map.get(approach, 1)
-        
-        return {
-            'question': 'What is the main approach used in this solution?',
-            'options': approach_options,
-            'correct': correct_idx,
-            'explanation': f'The solution primarily uses {approach} approach based on the implementation.'
-        }
 
 
 def render_flashcard(question_data, enable_formatting=True):
@@ -739,20 +618,6 @@ def render_flashcard(question_data, enable_formatting=True):
                         st.markdown(part)
         
         # Show test results if available
-        if st.session_state.get('show_test_results', False) and st.session_state.get('test_result'):
-            st.markdown("---")
-            st.subheader("🧪 Test Results")
-            
-            test_result = st.session_state.test_result
-            
-            if test_result['success']:
-                st.success("✅ Code executed successfully!")
-                if test_result['output']:
-                    st.code(test_result['output'], language='text')
-            else:
-                st.error("❌ Code execution failed!")
-                if test_result['error']:
-                    st.code(test_result['error'], language='text')
             
             # Note: The solution code is already displayed above, no need to show it again
 
@@ -1005,114 +870,6 @@ def render_enhanced_fill_blanks(question_data):
                 st.write(f"**Space:** {question_data['space_complexity']}")
 
 
-def render_multiple_choice_auto(question_data):
-    """Render auto-generated multiple choice from flashcard."""
-    question_text = question_data['question']
-    if question_text:
-        st.markdown(question_text)
-    
-    st.markdown("---")
-    
-    # Generate multiple choice question from answer
-    mc_question = generate_multiple_choice_questions(question_data['answer'])
-    
-    st.subheader("📋 Multiple Choice Quiz")
-    st.info("💡 This quiz was automatically generated from the solution analysis!")
-    
-    # Display the generated question
-    st.write(f"**{mc_question['question']}**")
-    
-    if 'user_answer' not in st.session_state:
-        st.session_state.user_answer = None
-    
-    # Create radio buttons for options
-    option_labels = [f"{chr(65+i)}) {opt}" for i, opt in enumerate(mc_question['options'])]
-    selected = st.radio("Select an answer:", 
-                       option_labels,
-                       key=f"mc_auto_{question_data['title']}")
-    
-    if selected:
-        st.session_state.user_answer = ord(selected[0]) - 65  # Convert A,B,C,D to 0,1,2,3
-    
-    # Show submit button
-    if st.button("✅ Submit Answer", use_container_width=True):
-        if st.session_state.user_answer is not None:
-            if st.session_state.user_answer == mc_question['correct']:
-                st.success("🎉 Correct!")
-            else:
-                correct_letter = chr(65 + mc_question['correct'])
-                st.error(f"❌ Incorrect. The correct answer is {correct_letter})")
-            
-            # Show explanation
-            st.markdown("---")
-            st.subheader("📖 Explanation")
-            st.markdown(f"**Correct Answer:** {chr(65 + mc_question['correct'])})")
-            for i, opt in enumerate(mc_question['options']):
-                if i == mc_question['correct']:
-                    st.markdown(f"**{chr(65+i)})** {opt} ✅")
-                else:
-                    st.markdown(f"**{chr(65+i)})** {opt}")
-            
-            st.markdown(f"**Explanation:** {mc_question['explanation']}")
-
-
-def render_multiple_choice(question_data):
-    """Render multiple choice question (legacy function for backward compatibility)."""
-    question_text = question_data['question']
-    if question_text:
-        st.markdown(question_text)
-    
-    st.markdown("---")
-    
-    # Parse multiple choice options
-    options_text = question_data['answer']
-    if options_text:
-        # Split by lines and parse options
-        lines = [line.strip() for line in options_text.split('\n') if line.strip()]
-        options = []
-        correct_answer = None
-        
-        for line in lines:
-            if line.startswith(('A)', 'B)', 'C)', 'D)', 'E)')):
-                option_text = line[2:].strip()
-                if '(CORRECT)' in option_text:
-                    option_text = option_text.replace('(CORRECT)', '').strip()
-                    correct_answer = line[0]
-                options.append((line[0], option_text))
-        
-        # Display options
-        st.subheader("📋 Choose Your Answer")
-        
-        if 'user_answer' not in st.session_state:
-            st.session_state.user_answer = None
-        
-        # Create radio buttons for options
-        selected = st.radio("Select an answer:", 
-                           [f"{opt[0]}) {opt[1]}" for opt in options],
-                           key=f"mc_{question_data['title']}")
-        
-        if selected:
-            st.session_state.user_answer = selected[0]
-        
-        # Show submit button
-        if st.button("✅ Submit Answer", use_container_width=True):
-            if st.session_state.user_answer:
-                if st.session_state.user_answer == correct_answer:
-                    st.success("🎉 Correct!")
-                else:
-                    st.error(f"❌ Incorrect. The correct answer is {correct_answer})")
-                
-                # Show explanation
-                st.markdown("---")
-                st.subheader("📖 Explanation")
-                st.markdown(f"**Correct Answer:** {correct_answer})")
-                for opt in options:
-                    if opt[0] == correct_answer:
-                        st.markdown(f"**{opt[0]})** {opt[1]} ✅")
-                    else:
-                        st.markdown(f"**{opt[0]})** {opt[1]}")
-
-
 def main():
     """Simple flashcard app."""
     
@@ -1261,8 +1018,8 @@ def main():
     st.markdown("**📚 Practice Mode**")
     practice_mode = st.selectbox(
         "Choose your learning style:",
-        ["Flashcard", "Fill in the Blanks", "Multiple Choice"],
-        help="💡 Flashcard: Reveal solutions • Fill Blanks: Complete code • Multiple Choice: Pick answers",
+        ["Flashcard", "Fill in the Blanks"],
+        help="💡 Flashcard: Reveal solutions • Fill Blanks: Complete code",
         label_visibility="collapsed",
         key="practice_mode_selector"
     )
@@ -1763,39 +1520,6 @@ def main():
         # Action buttons with better styling
         st.markdown("---")
         st.markdown("**🎯 Actions**")
-        
-        # Test runner button with improved styling
-        if st.button("🧪 Run Tests", use_container_width=True, type="primary"):
-            # Extract and run code from the answer
-            code_snippet = extract_code_from_answer(question_data['answer'])
-            if code_snippet:
-                if enable_formatting:
-                    # Format the code before running tests
-                    formatted_code = format_python_code(code_snippet)
-                    is_valid = is_valid_python(formatted_code)
-                    
-                    if is_valid:
-                        with st.spinner("Running tests..."):
-                            test_result = run_code_test(formatted_code)
-                            st.session_state.test_result = test_result
-                            st.session_state.show_test_results = True
-                            st.rerun()
-                    else:
-                        st.warning("⚠️ Code has syntax issues - attempting to run anyway")
-                        with st.spinner("Running tests..."):
-                            test_result = run_code_test(formatted_code)
-                            st.session_state.test_result = test_result
-                            st.session_state.show_test_results = True
-                            st.rerun()
-                else:
-                    # Run code as-is without formatting
-                    with st.spinner("Running tests..."):
-                        test_result = run_code_test(code_snippet)
-                        st.session_state.test_result = test_result
-                        st.session_state.show_test_results = True
-                        st.rerun()
-            else:
-                st.warning("No executable Python code found in the solution.")
         
         # Success/Failure tracking (only show after answer is revealed)
         if st.session_state.get('show_answer', False):
