@@ -5,6 +5,19 @@ Database-driven with 142+ problems and progress tracking.
 """
 
 import streamlit as st
+
+# Configure page layout and appearance - mobile-friendly
+st.set_page_config(
+    page_title="Recode - NeetCode 150",
+    page_icon="💻",
+    layout="wide",
+    initial_sidebar_state="auto",  # Auto-collapse on mobile
+    menu_items={
+        'Get Help': 'https://github.com/neetcode-gh/leetcode',
+        'Report a bug': None,
+        'About': "Recode - Mobile-friendly NeetCode practice app"
+    }
+)
 import random
 import json
 import subprocess
@@ -21,6 +34,31 @@ from database_utils import (
     get_problem_stats, search_problems
 )
 from code_validator import CodeValidator, ValidationLevel
+from code_masking import CodeMasker, DifficultyMode, MaskingMode
+from session_manager import session_manager
+
+
+@st.cache_data(ttl=600)  # Cache for 10 minutes - longer for mobile
+def load_questions_cached():
+    """Load questions from database with caching."""
+    return get_all_problems()
+
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def load_categories_and_tags():
+    """Load categories and tags with caching."""
+    return get_all_categories(), get_all_tags()
+
+@st.cache_data(ttl=900)  # Cache for 15 minutes - long cache for mobile performance
+def get_problem_counts():
+    """Get problem count statistics with heavy caching."""
+    questions = load_questions_cached()
+    return {
+        'total': len(questions),
+        'easy': len([q for q in questions if q.get('difficulty') == 'Easy']),
+        'medium': len([q for q in questions if q.get('difficulty') == 'Medium']),
+        'hard': len([q for q in questions if q.get('difficulty') == 'Hard'])
+    }
 
 
 def run_code_test(code_snippet):
@@ -226,8 +264,10 @@ def convert_db_problem_to_question_format(problem):
         cleaned_code = clean_python_code(problem['solution_code'])
         answer_text = f"```{language}\n{cleaned_code}\n```"
         
-        # Add explanation if available
-        if problem.get('explanation'):
+        # Add key idea and explanation if available
+        if problem.get('key_idea'):
+            answer_text += f"\n\n**💡 Key Insight:**\n{problem['key_idea']}"
+        elif problem.get('explanation'):
             answer_text += f"\n\n**💡 Key Insight:**\n{problem['explanation']}"
         
         # Add complexity analysis
@@ -257,88 +297,11 @@ def render_question(question_data, practice_mode, enable_formatting=True):
     if practice_mode == 'Flashcard':
         render_flashcard(question_data, enable_formatting)
     elif practice_mode == 'Fill in the Blanks':
-        render_fill_blanks_auto(question_data)
+        render_enhanced_fill_blanks(question_data)  # Use enhanced version
     elif practice_mode == 'Multiple Choice':
         render_multiple_choice_auto(question_data)
     else:
         render_flashcard(question_data, enable_formatting)  # Default fallback
-
-
-def generate_fill_blanks_template(answer_text):
-    """Generate fill-in-the-blanks template from flashcard answer."""
-    if not answer_text:
-        return "No code template available."
-    
-    # Find code blocks
-    parts = answer_text.split('```')
-    result_parts = []
-    
-    for i, part in enumerate(parts):
-        if i % 2 == 0:
-            # Regular text - keep as is
-            result_parts.append(part)
-        else:
-            # Code block - create blanks
-            lines = part.split('\n', 1)
-            if len(lines) > 1:
-                language = lines[0].strip()
-                code = lines[1]
-                
-                # Create blanks for key parts
-                code_with_blanks = create_code_blanks(code)
-                result_parts.append(f"```{language}\n{code_with_blanks}\n```")
-            else:
-                result_parts.append(f"```\n{part}\n```")
-    
-    return ''.join(result_parts)
-
-
-def create_code_blanks(code):
-    """Create blanks in code by replacing key terms with ___."""
-    # Common patterns to replace with blanks
-    replacements = [
-        # Function definitions and variables
-        (r'\bdef\s+(\w+)\s*\(', r'def \1('),
-        (r'\bif\s+', 'if '),
-        (r'\bfor\s+', 'for '),
-        (r'\bwhile\s+', 'while '),
-        (r'\breturn\s+', 'return '),
-        
-        # Common data structures and methods
-        (r'\b{}\b', '___'),  # Empty dict
-        (r'\b\[\]\b', '___'),  # Empty list
-        (r'\bset\(\)\b', '___'),  # Empty set
-        (r'\bCounter\b', '___'),
-        (r'\bdefaultdict\b', '___'),
-        (r'\.append\b', '.___'),
-        (r'\.add\b', '.___'),
-        (r'\.get\b', '.___'),
-        (r'\.items\(\)\b', '.___()'),
-        (r'\.keys\(\)\b', '.___()'),
-        (r'\.values\(\)\b', '.___()'),
-        
-        # Common functions
-        (r'\blen\b', '___'),
-        (r'\bmax\b', '___'),
-        (r'\bmin\b', '___'),
-        (r'\bsorted\b', '___'),
-        (r'\breversed\b', '___'),
-        (r'\benumerate\b', '___'),
-        (r'\brange\b', '___'),
-        
-        # Variables (simple heuristic)
-        (r'\bseen\b', '___'),
-        (r'\bresult\b', '___'),
-        (r'\bcount\b', '___'),
-        (r'\bfreq\b', '___'),
-    ]
-    
-    import re
-    result = code
-    for pattern, replacement in replacements:
-        result = re.sub(pattern, replacement, result)
-    
-    return result
 
 
 def generate_multiple_choice_questions(answer_text):
@@ -427,27 +390,36 @@ def generate_multiple_choice_questions(answer_text):
 
 
 def render_flashcard(question_data, enable_formatting=True):
-    """Render flashcard question."""
+    """Render mobile-friendly flashcard question."""
+    # Mobile-optimized question display
     question_text = question_data['question']
     if question_text:
-        st.markdown(question_text)
+        # Clean and format question text for mobile
+        formatted_question = question_text.replace('\n\n', '\n').strip()
+        st.markdown(formatted_question)
     
+    # Compact divider
     st.markdown("---")
     
-    # Flashcard reveal section
+    # Mobile-friendly flashcard reveal section
     if not st.session_state.show_answer:
-        st.info("💡 Take a moment to think about the solution before revealing the answer.")
-        if st.button("🔍 Reveal Solution", use_container_width=True, type="primary"):
-            st.session_state.show_answer = True
-            st.rerun()
+        # Compact info message
+        st.info("💭 Think through your solution first")
+        
+        # Large, touch-friendly reveal button
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("👁️ Reveal Answer", use_container_width=True, type="primary"):
+                st.session_state.show_answer = True
+                st.rerun()
     else:
-        st.success("🎯 Here's the solution!")
-        st.markdown("---")
+        # Compact success message
+        st.success("✅ Solution")
         
         # Display answer with automatic syntax highlighting
         answer_text = question_data['answer']
         if answer_text:
-            # Extract and display code with proper syntax highlighting
+            # Extract and display code with enhanced styling
             code_snippet = extract_code_from_answer(answer_text)
             if code_snippet:
                 if enable_formatting:
@@ -459,9 +431,22 @@ def render_flashcard(question_data, enable_formatting=True):
                         formatted_code = format_python_code(code_snippet, debug=debug_mode)
                         is_valid = is_valid_python(formatted_code)
                         
-                        # Show validation status (only if there are issues)
+                        # Enhanced code display with container
+                        st.markdown("**💻 Solution Code:**")
+                        
+                        # Show validation status with better styling
                         if not is_valid:
-                            st.warning("⚠️ Code may have formatting issues - displaying as-is")
+                            st.markdown("""
+                            <div style="
+                                background: rgba(251, 191, 36, 0.1);
+                                padding: 0.5rem;
+                                border-radius: 6px;
+                                border-left: 4px solid #f59e0b;
+                                margin-bottom: 1rem;
+                            ">
+                                ⚠️ <strong>Code Formatting Notice:</strong> Some formatting issues detected - displaying best version
+                            </div>
+                            """, unsafe_allow_html=True)
                             
                             # Add a diagnostic button for problematic code
                             if st.button("🔍 Diagnose Formatting Issue", key="diagnose_formatting"):
@@ -693,20 +678,58 @@ def render_flashcard(question_data, enable_formatting=True):
                                 else:
                                     st.info("ℹ️ Our validation function correctly identified the issue")
                         
-                        # Display the formatted Python code with syntax highlighting
+                        # Display the formatted Python code with enhanced styling
+                        st.markdown("""
+                        <div style="
+                            background: rgba(45, 55, 75, 0.1);
+                            border-radius: 8px;
+                            border: 1px solid rgba(255, 107, 107, 0.2);
+                            padding: 0.5rem;
+                            margin: 0.5rem 0;
+                            max-height: 600px;
+                            overflow-y: auto;
+                        ">
+                        """, unsafe_allow_html=True)
+                        
                         st.code(formatted_code, language="python")
+                        
+                        st.markdown("</div>", unsafe_allow_html=True)
                         
                         # Clear debug mode after use
                         if debug_mode:
                             st.session_state.force_debug = False
                     except Exception as e:
-                        # If formatting completely fails, show original code
-                        st.error(f"❌ Formatting failed: {str(e)}")
-                        st.info("Displaying original code without formatting")
+                        # If formatting completely fails, show original code with styling
+                        st.markdown("""
+                        <div style="
+                            background: rgba(251, 191, 36, 0.1);
+                            padding: 0.5rem;
+                            border-radius: 6px;
+                            border-left: 4px solid #f59e0b;
+                            margin-bottom: 1rem;
+                        ">
+                            ❌ <strong>Formatting failed:</strong> Displaying original code
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
                         st.code(code_snippet, language="python")
                 else:
-                    # Display code as-is without formatting
+                    # Display code as-is without formatting but with enhanced styling
+                    st.markdown("""
+                    <div style="
+                        background: rgba(45, 55, 75, 0.1);
+                        border-radius: 8px;
+                        border: 1px solid rgba(255, 107, 107, 0.2);
+                        padding: 0.5rem;
+                        margin: 0.5rem 0;
+                        max-height: 600px;
+                        overflow-y: auto;
+                    ">
+                    """, unsafe_allow_html=True)
+                    
                     st.code(code_snippet, language="python")
+                    
+                    st.markdown("</div>", unsafe_allow_html=True)
             
             # Display any explanatory text after the code
             parts = answer_text.split('```')
@@ -734,130 +757,252 @@ def render_flashcard(question_data, enable_formatting=True):
             # Note: The solution code is already displayed above, no need to show it again
 
 
-def render_fill_blanks(question_data):
-    """Render fill-in-the-blanks question."""
+def render_enhanced_fill_blanks(question_data):
+    """Render enhanced fill-in-the-blanks with dynamic blanks that change every time."""
     question_text = question_data['question']
     if question_text:
         st.markdown(question_text)
     
     st.markdown("---")
     
-    # Show the template with blanks
-    st.subheader("📝 Fill in the Blanks")
+    # Initialize session state for fill-blanks
+    if 'fill_blanks_state' not in st.session_state:
+        st.session_state.fill_blanks_state = {}
     
-    template = question_data['answer']
-    if template:
-        # Display the template with blanks
-        parts = template.split('```')
-        for i, part in enumerate(parts):
-            if i % 2 == 0:
-                # Regular text
-                if part.strip():
-                    st.markdown(part)
-            else:
-                # Code block with blanks
-                lines = part.split('\n', 1)
-                if len(lines) > 1:
-                    language = lines[0].strip()
-                    code = lines[1]
-                    st.code(code, language=language)
-                else:
-                    st.code(part)
+    problem_id = question_data['id']
+    state_key = f"problem_{problem_id}"
     
-    # Show answer button
-    if not st.session_state.show_answer:
-        if st.button("👁️ Show Filled Solution", use_container_width=True, type="primary"):
-            st.session_state.show_answer = True
-            st.rerun()
-    else:
-        st.subheader("✅ Filled Solution")
+    # Mobile-friendly header with compact controls
+    st.markdown("### 🧩 Fill-in-the-Blanks")
+    
+    # Mobile-responsive controls in expander to save space
+    with st.expander("⚙️ Settings", expanded=False):
+        col1, col2, col3 = st.columns(3)
         
-        # Parse and display the filled solution
-        filled_template = template
-        # Replace ___ with the actual answers (this would need to be parsed from comments)
-        # For now, just show the template again
-        st.markdown("*The filled solution would be displayed here*")
+        with col1:
+            difficulty = st.selectbox(
+                "Difficulty",
+                ["easy", "medium", "hard"],
+                index=1,
+                key=f"difficulty_{problem_id}",
+                help="Easy: 1 blank, Medium: 3 blanks, Hard: 5 blanks"
+            )
         
-        # Display the template with answers filled in
-        parts = template.split('```')
-        for i, part in enumerate(parts):
-            if i % 2 == 0:
-                # Regular text
-                if part.strip():
-                    st.markdown(part)
-            else:
-                # Code block - show with answers
-                lines = part.split('\n', 1)
-                if len(lines) > 1:
-                    language = lines[0].strip()
-                    code = lines[1]
-                    # Replace ___ with answers (simplified for demo)
-                    filled_code = code.replace('___', '**[ANSWER]**')
-                    st.code(filled_code, language=language)
-                else:
-                    st.code(part)
-
-
-def render_fill_blanks_auto(question_data):
-    """Render auto-generated fill-in-the-blanks from flashcard."""
-    question_text = question_data['question']
-    if question_text:
-        st.markdown(question_text)
-    
-    st.markdown("---")
-    
-    # Show the auto-generated template with blanks
-    st.subheader("📝 Fill in the Blanks")
-    st.info("💡 This template was automatically generated from the solution. Fill in the blanks!")
-    
-    # Generate template from the answer
-    template = generate_fill_blanks_template(question_data['answer'])
-    
-    if template:
-        # Display the template with blanks
-        parts = template.split('```')
-        for i, part in enumerate(parts):
-            if i % 2 == 0:
-                # Regular text
-                if part.strip():
-                    st.markdown(part)
-            else:
-                # Code block with blanks
-                lines = part.split('\n', 1)
-                if len(lines) > 1:
-                    language = lines[0].strip()
-                    code = lines[1]
-                    st.code(code, language=language)
-                else:
-                    st.code(part)
-    
-    # Show answer button
-    if not st.session_state.show_answer:
-        if st.button("👁️ Show Complete Solution", use_container_width=True, type="primary"):
-            st.session_state.show_answer = True
-            st.rerun()
-    else:
-        st.subheader("✅ Complete Solution")
+        with col2:
+            masking_mode = st.selectbox(
+                "Mode",
+                ["mixed", "line", "token"],
+                index=0,
+                key=f"masking_mode_{problem_id}",
+                help="Mixed: Lines + tokens, Line: Whole lines, Token: Individual words"
+            )
         
-        # Display the original answer
-        answer_text = question_data['answer']
-        if answer_text:
-            parts = answer_text.split('```')
-            for i, part in enumerate(parts):
-                if i % 2 == 0:
-                    if part.strip():
-                        st.markdown(part)
+        with col3:
+            if st.button("🔄 New", key=f"new_blanks_{problem_id}", help="Generate new blanks", use_container_width=True):
+                # Force new variation
+                if state_key in st.session_state.fill_blanks_state:
+                    del st.session_state.fill_blanks_state[state_key]
+                st.rerun()
+    
+    # Extract code from answer
+    code_snippet = extract_code_from_answer(question_data['answer'])
+    
+    if not code_snippet:
+        st.warning("No code found in this problem to create blanks.")
+        return
+    
+    # Get or create masked code
+    if state_key not in st.session_state.fill_blanks_state:
+        # Create new masked version with session-based seed
+        difficulty_mode = DifficultyMode(difficulty)
+        masking_mode_enum = MaskingMode(masking_mode)
+        session_seed = session_manager.get_new_variation_seed(problem_id, difficulty)
+        
+        masker = CodeMasker()
+        masked_result = masker.create_masked_code(code_snippet, difficulty_mode, masking_mode_enum, session_seed)
+        
+        st.session_state.fill_blanks_state[state_key] = {
+            'masked_code': masked_result.masked_code,
+            'blanks': masked_result.blanks,
+            'answers': masked_result.answers,
+            'difficulty': difficulty,
+            'masking_mode': masking_mode,
+            'user_inputs': [''] * len(masked_result.blanks),
+            'submitted': False,
+            'results': [],
+            'session_info': session_manager.get_session_info(problem_id)
+        }
+    
+    state = st.session_state.fill_blanks_state[state_key]
+    
+    # Show session info
+    session_info = state['session_info']
+    st.caption(f"🎯 Attempt #{session_info.get('attempt_number', 1)} • {len(state['blanks'])} blanks • Blanks change every time!")
+    
+    # Display masked code
+    st.markdown("**💻 Code with Blanks:**")
+    
+    # Enhanced code display with container
+    st.markdown("""
+    <div style="
+        background: rgba(45, 55, 75, 0.1);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 107, 107, 0.2);
+        padding: 0.5rem;
+        margin: 0.5rem 0;
+        max-height: 400px;
+        overflow-y: auto;
+    ">
+    """, unsafe_allow_html=True)
+    
+    st.code(state['masked_code'], language="python")
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Enhanced input section with better layout for line blanks
+    st.markdown("**📝 Fill in the Blanks:**")
+    
+    # Different layouts for line vs token blanks
+    line_blanks = [b for b in state['blanks'] if hasattr(b, 'is_line') and b.is_line]
+    token_blanks = [b for b in state['blanks'] if not (hasattr(b, 'is_line') and b.is_line)]
+    
+    # Handle line blanks first (full width)
+    if line_blanks:
+        st.markdown("**🔍 Missing Lines:**")
+        for i, blank in enumerate([b for b in state['blanks'] if hasattr(b, 'is_line') and b.is_line]):
+            blank_idx = state['blanks'].index(blank)
+            
+            # Show context for line blanks
+            if hasattr(blank, 'context_before') and blank.context_before:
+                st.caption(f"Code before: `{blank.context_before}`")
+            
+            # Enhanced hint display for lines
+            hint_text = f"{blank.hint}"
+            if hasattr(blank, 'explanation') and blank.explanation:
+                hint_text += f" - {blank.explanation}"
+            
+            state['user_inputs'][blank_idx] = st.text_area(
+                f"Line [{blank.blank_id}] - {blank.category}",
+                value=state['user_inputs'][blank_idx],
+                key=f"line_blank_{problem_id}_{blank.blank_id}_{state['session_info']['attempt_number']}",
+                help=hint_text,
+                height=80,
+                placeholder=f"Enter the missing {blank.category} line here..."
+            )
+            
+            if hasattr(blank, 'context_after') and blank.context_after:
+                st.caption(f"Code after: `{blank.context_after}`")
+            
+            # Show individual feedback if submitted
+            if state['submitted'] and blank_idx < len(state['results']):
+                if state['results'][blank_idx]:
+                    st.success(f"✅ Correct line!")
                 else:
-                    lines = part.split('\n', 1)
-                    if len(lines) > 1:
-                        language = lines[0].strip()
-                        code = lines[1]
-                        if language:
-                            st.code(code, language=language)
-                        else:
-                            st.code(code)
+                    st.error(f"❌ Expected: `{state['answers'][blank_idx]}`")
+            
+            st.markdown("---")
+    
+    # Handle token blanks (mobile-friendly columns)
+    if token_blanks:
+        st.markdown("**🎯 Missing Tokens:**")
+        cols = st.columns(min(len(token_blanks), 3))  # Max 3 columns for mobile
+        
+        token_counter = 0
+        for i, blank in enumerate(state['blanks']):
+            if hasattr(blank, 'is_line') and blank.is_line:
+                continue
+                
+            col_idx = token_counter % len(cols)
+            token_counter += 1
+            
+            with cols[col_idx]:
+                # Show hint and category
+                hint_text = f"Hint: {blank.hint}" if blank.hint != '_' * len(blank.token) else f"Type: {blank.category}"
+                
+                state['user_inputs'][i] = st.text_input(
+                    f"Token [{blank.blank_id}]",
+                    value=state['user_inputs'][i],
+                    key=f"token_blank_{problem_id}_{blank.blank_id}_{state['session_info']['attempt_number']}",
+                    help=hint_text,
+                    placeholder=f"{blank.category}"
+                )
+                
+                # Show individual feedback if submitted
+                if state['submitted'] and i < len(state['results']):
+                    if state['results'][i]:
+                        st.success(f"✅ Correct!")
                     else:
-                        st.code(part)
+                        st.error(f"❌ Expected: `{state['answers'][i]}`")
+    
+    # Action buttons
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col1:
+        if st.button("🔍 Check Answers", use_container_width=True, type="primary", key=f"check_{problem_id}_{state['session_info']['attempt_number']}"):
+            # Check answers
+            results = []
+            for i, (user_input, correct_answer) in enumerate(zip(state['user_inputs'], state['answers'])):
+                results.append(user_input.strip() == correct_answer.strip())
+            
+            state['results'] = results
+            state['submitted'] = True
+            
+            # Calculate score
+            score = sum(results)
+            total = len(results)
+            
+            if score == total:
+                st.balloons()
+                st.success(f"🎉 Perfect! {score}/{total} correct!")
+                # Update problem stats
+                update_problem_stats(problem_id, success=True)
+            else:
+                st.info(f"📊 Score: {score}/{total} correct. Keep practicing!")
+                if score > 0:
+                    update_problem_stats(problem_id, success=False)
+            
+            st.rerun()
+    
+    with col2:
+        if st.button("💡 Show Hints", use_container_width=True, key=f"hints_{problem_id}"):
+            st.info("💡 Hints are shown below each input field!")
+    
+    with col3:
+        if st.button("🔍 Show Solution", use_container_width=True, key=f"solution_{problem_id}"):
+            st.session_state.show_answer = True
+            st.rerun()
+    
+    # Show complete solution if requested
+    if st.session_state.get('show_answer', False):
+        st.markdown("---")
+        st.success("✅ Complete Solution:")
+        
+        # Display the original code with enhanced styling
+        st.markdown("**💻 Original Code:**")
+        st.markdown("""
+        <div style="
+            background: rgba(34, 197, 94, 0.1);
+            border-radius: 8px;
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            padding: 0.5rem;
+            margin: 0.5rem 0;
+        ">
+        """, unsafe_allow_html=True)
+        
+        st.code(code_snippet, language="python")
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        # Show key insights if available
+        if question_data.get('key_idea'):
+            st.markdown("**💡 Key Insight:**")
+            st.info(question_data['key_idea'])
+        
+        # Show complexity analysis if available
+        if question_data.get('time_complexity') or question_data.get('space_complexity'):
+            st.markdown("**📊 Complexity Analysis:**")
+            if question_data.get('time_complexity'):
+                st.write(f"**Time:** {question_data['time_complexity']}")
+            if question_data.get('space_complexity'):
+                st.write(f"**Space:** {question_data['space_complexity']}")
 
 
 def render_multiple_choice_auto(question_data):
@@ -970,59 +1115,177 @@ def render_multiple_choice(question_data):
 
 def main():
     """Simple flashcard app."""
-    st.set_page_config(
-        page_title="Recode",
-        page_icon="💻",
-        layout="wide"
-    )
     
-    # Load questions from database
-    db_problems = load_questions()
+    # Add custom CSS for better styling and responsiveness
+    st.markdown("""
+    <style>
+    /* Mobile-first responsive design */
+    .main > div {
+        padding-top: 0.5rem;
+        max-width: 100%;
+    }
+    
+    /* Touch-friendly buttons - minimum 44px height for iOS */
+    .stButton > button {
+        width: 100%;
+        min-height: 44px;
+        border-radius: 12px;
+        border: none;
+        padding: 0.75rem 1rem;
+        font-size: 16px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    /* Primary button styling */
+    div[data-testid="stButton"] button[kind="primary"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    /* Code block - mobile optimized */
+    .stCode {
+        max-height: 300px;
+        overflow-y: auto;
+        border-radius: 8px;
+        font-size: 14px;
+    }
+    
+    /* Mobile-specific optimizations */
+    @media (max-width: 768px) {
+        .main > div {
+            padding: 0.25rem 0.5rem;
+        }
+        
+        /* Larger touch targets */
+        .stButton > button {
+            font-size: 16px;
+            padding: 0.875rem 1rem;
+            margin: 0.25rem 0;
+        }
+        
+        /* Prevent zoom on iOS input fields */
+        .stTextInput > div > div > input,
+        .stTextArea > div > div > textarea,
+        .stSelectbox > div > div {
+            font-size: 16px !important;
+            padding: 0.75rem;
+        }
+        
+        /* Compact columns */
+        .stColumns > div {
+            padding: 0.25rem;
+        }
+        
+        /* Responsive headers */
+        h1 { font-size: 1.75rem !important; }
+        h2 { font-size: 1.5rem !important; }
+        h3 { font-size: 1.25rem !important; }
+    }
+    
+    /* Extra small screens */
+    @media (max-width: 480px) {
+        .main > div {
+            padding: 0.25rem;
+        }
+        
+        .stButton > button {
+            font-size: 15px;
+            padding: 0.75rem 0.875rem;
+        }
+        
+        .stCode {
+            max-height: 250px;
+            font-size: 13px;
+        }
+    }
+    
+    /* Progress bar styling */
+    .stProgress > div > div {
+        background-color: #667eea;
+        border-radius: 4px;
+    }
+    
+    /* Better expander styling */
+    .streamlit-expanderHeader {
+        font-size: 16px !important;
+        padding: 0.75rem !important;
+        background-color: rgba(255, 107, 107, 0.05);
+        border-radius: 8px;
+    }
+    
+    /* Visual separators */
+    .section-divider {
+        border-top: 2px solid rgba(255, 107, 107, 0.2);
+        margin: 2rem 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Load questions from database (cached)
+    db_problems = load_questions_cached()
     
     # Convert database format to question format
     questions = [convert_db_problem_to_question_format(p) for p in db_problems]
     
-    # Get all available tags and categories
-    all_tags = get_all_tags()
-    all_categories = get_all_categories()
+    # Get all available tags and categories (cached)
+    all_categories, all_tags = load_categories_and_tags()
     
-    # Logo placeholder (you can replace with actual logo file)
+    # Enhanced header with responsive design
     st.markdown("""
-    <div style="text-align: center; margin-bottom: 2rem;">
-        <h1 style="color: #FF6B6B; font-family: monospace; font-size: 3rem; margin: 0;">💻 Recode</h1>
-        <p style="color: #FAFAFA; font-size: 1.2rem; margin: 0.5rem 0;">Revise core coding concepts, one snippet at a time</p>
+    <div style="text-align: center; margin-bottom: 2rem; padding: 1rem;">
+        <h1 style="
+            color: #FF6B6B; 
+            font-family: monospace; 
+            font-size: clamp(2rem, 5vw, 3rem);
+            margin: 0;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        ">💻 Recode</h1>
+        <p style="
+            color: #FAFAFA; 
+            font-size: clamp(1rem, 2.5vw, 1.2rem);
+            margin: 0.5rem 0;
+            opacity: 0.9;
+        ">Master the NeetCode 150 • Track your progress • Build confidence</p>
     </div>
+    <div class="section-divider"></div>
     """, unsafe_allow_html=True)
     
-    # Mode switcher
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        practice_mode = st.selectbox("Practice Mode", 
-                                   ["Flashcard", "Fill in the Blanks", "Multiple Choice"],
-                                   help="Choose how you want to practice the same questions")
+    # Mobile-friendly mode switcher
+    st.markdown("**📚 Practice Mode**")
+    practice_mode = st.selectbox(
+        "Choose your learning style:",
+        ["Flashcard", "Fill in the Blanks", "Multiple Choice"],
+        help="💡 Flashcard: Reveal solutions • Fill Blanks: Complete code • Multiple Choice: Pick answers",
+        label_visibility="collapsed",
+        key="practice_mode_selector"
+    )
     
-    # Randomization toggle
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        randomize_questions = st.checkbox("🎲 Randomize Questions", 
+    # Mobile-friendly toggles in columns
+    col1, col2 = st.columns(2)
+    with col1:
+        randomize_questions = st.checkbox("🎲 Random", 
                                         value=True,
-                                        help="When enabled, questions are selected randomly. When disabled, questions follow a sequential order.")
-    
-    # Code formatting toggle
-    col1, col2, col3 = st.columns([1, 2, 1])
+                                        help="Randomize question order")
     with col2:
-        enable_formatting = st.checkbox("🎨 Enable Code Formatting", 
+        enable_formatting = st.checkbox("🎨 Format Code", 
                                       value=True,
-                                      help="When enabled, code is automatically formatted with black. When disabled, code is displayed as-is.")
+                                      help="Auto-format code display")
     
-    # Sidebar for adding questions and filtering
+    # Mobile-optimized sidebar
     with st.sidebar:
-        st.header("➕ Add New Question")
+        st.markdown("### ➕ Add Question")
         
         with st.form("add_question"):
-            title = st.text_input("Question Title", placeholder="e.g., Two Sum")
-            question = st.text_area("Question", placeholder="Enter your question here...\n\nExample:\nGiven an array nums and integer k, return k most frequent elements.\n\nInput: nums = [1,1,1,2,2,3], k = 2\nOutput: [1,2]", height=150)
-            answer = st.text_area("Answer", placeholder="Enter your complete answer with solution...\n\nExample:\n```python\ndef topKFrequent(nums, k):\n    count = Counter(nums)\n    bucket = [[] for _ in range(max(count.values()) + 1)]\n    for num, freq in count.items():\n        bucket[freq].append(num)\n    # ... rest of solution\n```\n\nTime: O(n), Space: O(n)", height=200)
+            title = st.text_input("Title", placeholder="e.g., Two Sum")
+            question = st.text_area("Question", placeholder="Problem description...", height=100)
+            answer = st.text_area("Solution", placeholder="Code solution with explanation...", height=120)
             
             # Tags section
             st.write("**Tags (optional):**")
@@ -1031,14 +1294,14 @@ def main():
             
             col1, col2 = st.columns(2)
             with col1:
-                difficulty = st.selectbox("Difficulty", ["", "Easy", "Medium", "Hard"])
+                difficulty = st.selectbox("Difficulty", ["", "Easy", "Medium", "Hard"], key="add_problem_difficulty")
             with col2:
                 category_options = ["", "Array", "Hash Map", "Two Pointers", "Binary Search", "Tree", "Graph", "Dynamic Programming", "Greedy", "Sorting"]
                 # Add existing custom categories
                 for tag in sorted(all_tags):
                     if tag not in category_options and tag not in ["Easy", "Medium", "Hard"]:
                         category_options.append(tag)
-                category = st.selectbox("Category", category_options)
+                category = st.selectbox("Category", category_options, key="add_problem_category")
             
             # Custom tags with ability to add new ones
             st.write("**Additional Tags:**")
@@ -1129,20 +1392,20 @@ def main():
             else:
                 st.warning("No problems found matching your search.")
         
-        # Enhanced filtering
-        st.subheader("🔍 Smart Filters")
+        # Mobile-friendly filtering
+        st.markdown("### 🔍 Filters")
         
-        # Difficulty filter
+        # Compact difficulty filter
         difficulty_options = ["All", "Easy", "Medium", "Hard"]
-        selected_difficulty = st.selectbox("Difficulty", difficulty_options)
+        selected_difficulty = st.selectbox("Difficulty", difficulty_options, key="filter_difficulty")
         
         # Category filter
         category_options = ["All"] + all_categories
-        selected_category = st.selectbox("Category", category_options)
+        selected_category = st.selectbox("Category", category_options, key="filter_category")
         
         # Status filter (based on review history)
         status_options = ["All", "New", "Needs Review", "Mastered"]
-        selected_status = st.selectbox("Review Status", status_options)
+        selected_status = st.selectbox("Review Status", status_options, key="filter_status")
         
         # Tag filtering (additional tags)
         st.subheader("🏷️ Additional Tags")
@@ -1236,7 +1499,8 @@ def main():
                 "Validation Level",
                 ["Basic", "Strict", "Comprehensive"],
                 index=2,
-                help="Choose validation thoroughness"
+                help="Choose validation thoroughness",
+                key="validation_level"
             )
             
             level_map = {
@@ -1373,76 +1637,135 @@ def main():
                     st.markdown("**Cleaning Report:**")
                     st.markdown(report)
     
-    # Create two-column layout
-    col1, col2 = st.columns([2, 1])
+    # Create responsive two-column layout
+    col_main, col_meta = st.columns([3, 1], gap="large")
     
-    with col1:
-        # Question content
-        st.markdown("---")
-        st.subheader(f"❓ {question_data['title']}")
-        
-        # Display LeetCode link if available
-        if question_data.get('leetcode_link'):
-            st.markdown(f"🔗 [View on LeetCode]({question_data['leetcode_link']})")
-        
-        # Display tags if they exist
-        if 'tags' in question_data and question_data['tags']:
-            tag_colors = {
-                'Easy': '🟢', 'Medium': '🟡', 'Hard': '🔴',
-                'Array': '🔵', 'Hash Map': '🟣', 'Two Pointers': '🟠',
-                'Binary Search': '🔵', 'Tree': '🟢', 'Graph': '🟣',
-                'Dynamic Programming': '🟠', 'Greedy': '🟡', 'Sorting': '🔵'
-            }
+    with col_main:
+        # Main problem container
+        with st.container():
+            # Problem header with better styling
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(135deg, rgba(255, 107, 107, 0.1), rgba(255, 107, 107, 0.05));
+                padding: 1.5rem;
+                border-radius: 12px;
+                border-left: 4px solid #FF6B6B;
+                margin-bottom: 1rem;
+            ">
+                <h2 style="margin: 0; color: #FF6B6B; font-size: 1.8rem;">❓ {question_data['title']}</h2>
+            """, unsafe_allow_html=True)
             
-            tag_display = []
-            for tag in question_data['tags']:
-                color = tag_colors.get(tag, '⚪')
-                tag_display.append(f"{color} {tag}")
+            # Problem metadata in a clean row
+            meta_col1, meta_col2, meta_col3 = st.columns([1, 1, 2])
             
-            st.write("**Tags:** " + " ".join(tag_display))
+            with meta_col1:
+                # Display LeetCode link if available
+                if question_data.get('leetcode_link'):
+                    st.markdown(f"🔗 [**LeetCode**]({question_data['leetcode_link']})")
+            
+            with meta_col2:
+                # Show difficulty prominently
+                difficulty = None
+                if 'tags' in question_data and question_data['tags']:
+                    for tag in question_data['tags']:
+                        if tag in ['Easy', 'Medium', 'Hard']:
+                            difficulty = tag
+                            break
+                
+                if difficulty:
+                    difficulty_colors = {'Easy': '#22c55e', 'Medium': '#f59e0b', 'Hard': '#ef4444'}
+                    color = difficulty_colors.get(difficulty, '#6b7280')
+                    st.markdown(f'<span style="color: {color}; font-weight: bold;">●</span> **{difficulty}**', unsafe_allow_html=True)
+            
+            with meta_col3:
+                # Display category and tags in a clean format
+                if 'tags' in question_data and question_data['tags']:
+                    tag_colors = {
+                        'Easy': '🟢', 'Medium': '🟡', 'Hard': '🔴',
+                        'Array': '🔵', 'Hash Map': '🟣', 'Two Pointers': '🟠',
+                        'Binary Search': '🔵', 'Tree': '🟢', 'Graph': '🟣',
+                        'Dynamic Programming': '🟠', 'Greedy': '🟡', 'Sorting': '🔵'
+                    }
+                    
+                    non_difficulty_tags = [tag for tag in question_data['tags'] if tag not in ['Easy', 'Medium', 'Hard']]
+                    if non_difficulty_tags:
+                        tag_display = []
+                        for tag in non_difficulty_tags[:3]:  # Limit to 3 main tags
+                            color = tag_colors.get(tag, '⚪')
+                            tag_display.append(f"{color} {tag}")
+                        
+                        st.markdown("**Tags:** " + " ".join(tag_display))
+            
+            st.markdown("</div>", unsafe_allow_html=True)
         
-        # Render question based on the selected practice mode
-        render_question(question_data, practice_mode, enable_formatting)
+        # Problem content area
+        with st.container():
+            render_question(question_data, practice_mode, enable_formatting)
     
-    with col2:
-        # Stats and actions sidebar
-        st.markdown("---")
-        st.subheader("📊 Progress")
-        
+    with col_meta:
+        # Enhanced progress card
+        with st.container():
+            st.markdown("""
+            <div style="
+                background: rgba(255, 107, 107, 0.05);
+                padding: 1.5rem;
+                border-radius: 12px;
+                border: 1px solid rgba(255, 107, 107, 0.1);
+                margin-bottom: 1rem;
+            ">
+                <h3 style="margin: 0 0 1rem 0; color: #FF6B6B;">📊 Progress</h3>
+            </div>
+            """, unsafe_allow_html=True)
+            
         # Get problem stats from database
         stats = get_problem_stats(question_data['id'])
         
-        # Display metrics
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.metric("Times Reviewed", stats['times_reviewed'])
-        with col_b:
+        # Display metrics in cards
+        metric_col1, metric_col2 = st.columns(2)
+        with metric_col1:
+            st.markdown(f"""
+            <div class="metric-container" style="text-align: center;">
+                <div style="font-size: 2rem; font-weight: bold; color: #FF6B6B;">{stats['times_reviewed']}</div>
+                <div style="font-size: 0.8rem; opacity: 0.8;">Reviews</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with metric_col2:
             success_rate = (stats['success_count'] / stats['times_reviewed'] * 100) if stats['times_reviewed'] > 0 else 0
-            st.metric("Success Rate", f"{success_rate:.0f}%")
+            success_color = "#22c55e" if success_rate >= 70 else "#f59e0b" if success_rate >= 40 else "#ef4444"
+            st.markdown(f"""
+            <div class="metric-container" style="text-align: center;">
+                <div style="font-size: 2rem; font-weight: bold; color: {success_color};">{success_rate:.0f}%</div>
+                <div style="font-size: 0.8rem; opacity: 0.8;">Success</div>
+            </div>
+            """, unsafe_allow_html=True)
         
-        # Progress bar for current session
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Session progress with better styling
         if 'session_progress' not in st.session_state:
             st.session_state.session_progress = {'current': 1, 'total': len(filtered_questions)}
         
         progress = st.session_state.session_progress['current'] / st.session_state.session_progress['total']
+        st.markdown("**Session Progress**")
         st.progress(progress)
         st.caption(f"Question {st.session_state.session_progress['current']} of {st.session_state.session_progress['total']}")
         
-        # Navigation status
+        # Session info with icons
+        st.markdown("---")
         if len(st.session_state.question_history) > 0:
-            st.caption(f"📚 History: {len(st.session_state.question_history)} questions")
+            st.markdown(f"📚 **History:** {len(st.session_state.question_history)} questions")
         
-        # Randomization mode indicator
         mode_icon = "🎲" if randomize_questions else "📋"
         mode_text = "Random" if randomize_questions else "Sequential"
-        st.caption(f"{mode_icon} Mode: {mode_text}")
+        st.markdown(f"{mode_icon} **Mode:** {mode_text}")
         
-        # Action buttons
+        # Action buttons with better styling
         st.markdown("---")
-        st.subheader("🎯 Actions")
+        st.markdown("**🎯 Actions**")
         
-        # Test runner button
-        if st.button("🧪 Run Tests", use_container_width=True):
+        # Test runner button with improved styling
+        if st.button("🧪 Run Tests", use_container_width=True, type="primary"):
             # Extract and run code from the answer
             code_snippet = extract_code_from_answer(question_data['answer'])
             if code_snippet:
@@ -1495,7 +1818,7 @@ def main():
         with col_back:
             # Go back button (only show if there's history)
             if len(st.session_state.question_history) > 0:
-                if st.button("⬅️ Go Back", use_container_width=True):
+                if st.button("⬅️ Back", use_container_width=True):
                     # Go back to previous question
                     st.session_state.current_question_index -= 1
                     st.session_state.current_question = st.session_state.question_history[st.session_state.current_question_index]
@@ -1503,11 +1826,11 @@ def main():
                     st.session_state.session_progress['current'] -= 1
                     st.rerun()
             else:
-                st.button("⬅️ Go Back", use_container_width=True, disabled=True)
+                st.button("⬅️ Back", use_container_width=True, disabled=True)
         
         with col_next:
             # Next question button
-            if st.button("➡️ Next Problem", use_container_width=True):
+            if st.button("➡️ Next", use_container_width=True, type="primary"):
                 # Add current question to history before moving to next
                 if st.session_state.current_question_index == -1:
                     # First question, add to history
@@ -1582,7 +1905,8 @@ def main():
             with col1:
                 current_difficulty = next((tag for tag in current_tags if tag in ["Easy", "Medium", "Hard"]), "")
                 difficulty = st.selectbox("Difficulty", ["", "Easy", "Medium", "Hard"], 
-                                        index=["", "Easy", "Medium", "Hard"].index(current_difficulty) if current_difficulty else 0)
+                                        index=["", "Easy", "Medium", "Hard"].index(current_difficulty) if current_difficulty else 0,
+                                        key="edit_problem_difficulty")
             with col2:
                 category_options = ["", "Array", "Hash Map", "Two Pointers", "Binary Search", "Tree", "Graph", "Dynamic Programming", "Greedy", "Sorting"]
                 # Add existing custom categories
@@ -1591,7 +1915,8 @@ def main():
                         category_options.append(tag)
                 current_category = next((tag for tag in current_tags if tag in category_options), "")
                 category = st.selectbox("Category", category_options,
-                                      index=category_options.index(current_category) if current_category else 0)
+                                      index=category_options.index(current_category) if current_category else 0,
+                                      key="edit_problem_category")
             
             # Additional tags
             existing_tags = sorted([tag for tag in all_tags if tag not in ["Easy", "Medium", "Hard"]])
@@ -1730,5 +2055,6 @@ def main():
                     st.rerun()
 
 
+# Run main function
 if __name__ == '__main__':
     main()
