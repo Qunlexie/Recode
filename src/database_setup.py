@@ -124,10 +124,11 @@ def extract_problem_info_from_docstring(content):
     return info
 
 def extract_solution_code(content):
-    """Extract clean solution code from the file."""
+    """Extract and auto-format clean solution code from the file."""
     try:
         # Parse AST and find the Solution class
         tree = ast.parse(content)
+        raw_code = content.strip()
         
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name == 'Solution':
@@ -137,17 +138,31 @@ def extract_solution_code(content):
                 end_line = node.end_lineno if hasattr(node, 'end_lineno') else len(lines)
                 
                 solution_lines = lines[start_line:end_line]
-                return '\n'.join(solution_lines)
+                raw_code = '\n'.join(solution_lines)
+                break
+        else:
+            # If no Solution class found, return the content after docstring
+            tree = ast.parse(content)
+            docstring = ast.get_docstring(tree)
+            if docstring:
+                # Find where docstring ends and return the rest
+                docstring_end = content.find('"""', content.find('"""') + 3) + 3
+                raw_code = content[docstring_end:].strip()
         
-        # If no Solution class found, return the content after docstring
-        tree = ast.parse(content)
-        docstring = ast.get_docstring(tree)
-        if docstring:
-            # Find where docstring ends and return the rest
-            docstring_end = content.find('"""', content.find('"""') + 3) + 3
-            return content[docstring_end:].strip()
-        
-        return content.strip()
+        # Auto-format the extracted code
+        try:
+            # Import here to avoid circular imports
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            from code_validator import CodeValidator, ValidationLevel
+            
+            validator = CodeValidator(ValidationLevel.COMPREHENSIVE)
+            result = validator.validate_and_fix_code(raw_code, debug=False)
+            return result.fixed_code
+        except Exception as format_error:
+            print(f"Warning: Could not format code, using original: {format_error}")
+            return raw_code
         
     except Exception as e:
         print(f"Error extracting solution code: {e}")
@@ -258,8 +273,14 @@ def import_neetcode_solutions(conn, neetcode_path):
             # Get difficulty
             difficulty = get_difficulty_from_leetcode_id(solution_data['leetcode_id'])
             
-            # Create LeetCode link
-            leetcode_link = f"https://leetcode.com/problems/{python_file.stem.replace('_', '-')}/" if solution_data['leetcode_id'] else None
+            # Create LeetCode link - strip the leetcode ID prefix from filename
+            if solution_data['leetcode_id']:
+                # Extract problem slug from filename by removing the leetcode ID prefix
+                # e.g., "0100-same-tree" -> "same-tree"
+                problem_slug = re.sub(r'^\d{4}-', '', python_file.stem.replace('_', '-'))
+                leetcode_link = f"https://leetcode.com/problems/{problem_slug}/"
+            else:
+                leetcode_link = None
             
             # Create tags
             tags = [category_name, difficulty]

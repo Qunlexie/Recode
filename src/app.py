@@ -5,6 +5,7 @@ Database-driven with 142+ problems and progress tracking.
 """
 
 import streamlit as st
+import time 
 
 # Configure page layout and appearance - mobile-friendly
 st.set_page_config(
@@ -29,7 +30,9 @@ from database_utils import (
     get_all_problems, get_random_problem, get_problem_by_id,
     filter_problems, get_all_categories, get_all_tags,
     update_problem_stats, add_custom_problem, update_problem,
-    get_problem_stats, search_problems
+    get_problem_stats, search_problems, get_dashboard_stats,
+    save_session, load_session, clear_session,
+    fix_leetcode_links, reset_all_problem_stats
 )
 from code_validator import CodeValidator, ValidationLevel
 from code_masking import CodeMasker, DifficultyMode, MaskingMode
@@ -57,6 +60,210 @@ def get_problem_counts():
         'medium': len([q for q in questions if q.get('difficulty') == 'Medium']),
         'hard': len([q for q in questions if q.get('difficulty') == 'Hard'])
     }
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_cached_search_results(query: str):
+    """Cache search results to avoid repeated database queries."""
+    return search_problems(query)
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_cached_dashboard_stats():
+    """Cache dashboard statistics for better performance."""
+    return get_dashboard_stats()
+
+@st.cache_data(ttl=120)  # Cache for 2 minutes (shorter due to stats changes)
+def get_cached_problem_stats(problem_id: int):
+    """Get problem stats with caching."""
+    return get_problem_stats(problem_id)
+
+
+def auto_scroll_to_top():
+    """Add JavaScript to auto-scroll to top of page."""
+    st.markdown("""
+    <script>
+        window.scrollTo(0, 0);
+        // Ensure scroll happens after Streamlit renders
+        setTimeout(function() { window.scrollTo(0, 0); }, 100);
+    </script>
+    """, unsafe_allow_html=True)
+
+
+def move_to_next_problem(filtered_questions, randomize_questions):
+    """Move to the next problem and reset answer state with auto-scroll."""
+    # Add current question to history before moving to next
+    if st.session_state.current_question_index == -1:
+        # First question, add to history
+        st.session_state.question_history.append(st.session_state.current_question)
+        st.session_state.current_question_index = 0
+    else:
+        # Already have history, just increment index
+        st.session_state.current_question_index += 1
+    
+    # Get next question based on randomization setting
+    if randomize_questions:
+        # Track seen questions in current filtered session
+        if 'seen_in_current_filter' not in st.session_state:
+            st.session_state.seen_in_current_filter = set()
+        
+        # Add current question to seen set
+        current_id = st.session_state.current_question['id']
+        st.session_state.seen_in_current_filter.add(current_id)
+        
+        # Find unseen questions in filtered set
+        unseen_questions = [q for q in filtered_questions if q['id'] not in st.session_state.seen_in_current_filter]
+        
+        if unseen_questions:
+            next_question = random.choice(unseen_questions)
+        else:
+            # All questions seen, reset and pick randomly
+            st.session_state.seen_in_current_filter = set()
+            next_question = random.choice(filtered_questions)
+    else:
+        # Sequential order - get next question in filtered list
+        current_id = st.session_state.current_question['id']
+        current_index = next((i for i, q in enumerate(filtered_questions) if q['id'] == current_id), 0)
+        next_index = (current_index + 1) % len(filtered_questions)
+        next_question = filtered_questions[next_index]
+    
+    st.session_state.current_question = next_question
+    
+    # Add to history if not already there
+    if st.session_state.current_question_index >= len(st.session_state.question_history):
+        st.session_state.question_history.append(next_question)
+    
+    # Reset answer state and increment progress
+    st.session_state.show_answer = False
+    st.session_state.current_question_answered = False  # Reset answered flag for new question
+    st.session_state.session_progress['current'] += 1
+
+
+def get_session_id():
+    """Generate or retrieve a unique session ID for this browser."""
+    import hashlib
+    import time
+    
+    # Try to get session ID from browser storage using JavaScript
+    session_id = st.query_params.get("session_id", None)
+    
+    if not session_id:
+        # Generate new session ID based on timestamp and random seed
+        timestamp = str(time.time())
+        random_seed = str(random.randint(1000, 9999))
+        session_id = hashlib.md5((timestamp + random_seed).encode()).hexdigest()[:16]
+        
+        # Set as query param to maintain across refreshes
+        st.query_params["session_id"] = session_id
+    
+    return session_id
+
+
+def save_persistent_session():
+    """Save current session state to database."""
+    session_id = get_session_id()
+    
+    # Extract important session state
+    session_data = {
+        'current_question_id': getattr(st.session_state.get('current_question', {}), 'get', lambda x, d=None: d)('id', None),
+        'current_question': st.session_state.get('current_question', {}),
+        'question_history': st.session_state.get('question_history', []),
+        'current_question_index': st.session_state.get('current_question_index', -1),
+        'show_answer': st.session_state.get('show_answer', False),
+        'current_question_answered': st.session_state.get('current_question_answered', False),
+        'session_progress': st.session_state.get('session_progress', {'current': 1, 'total': 1}),
+        'dashboard_filter_active': st.session_state.get('dashboard_filter_active', False),
+        'dashboard_filter_type': st.session_state.get('dashboard_filter_type', None),
+        'last_filters': {
+            'practice_mode': st.session_state.get('practice_mode_selector', 'Flashcard'),
+            'randomize': st.session_state.get('randomize_questions', True),
+            'enable_formatting': st.session_state.get('enable_formatting', True),
+        },
+        'timestamp': time.time()
+    }
+    
+    try:
+        save_session(session_id, session_data)
+    except Exception as e:
+        # Fail silently - don't break the app if session save fails
+        print(f"Warning: Could not save session: {e}")
+
+
+def load_persistent_session():
+    """Load session state from database."""
+    session_id = get_session_id()
+    
+    try:
+        session_data = load_session(session_id)
+        
+        if session_data:
+            # Restore session state
+            if session_data.get('current_question'):
+                st.session_state.current_question = session_data['current_question']
+            
+            if session_data.get('question_history'):
+                st.session_state.question_history = session_data['question_history']
+            
+            if session_data.get('current_question_index') is not None:
+                st.session_state.current_question_index = session_data['current_question_index']
+            
+            if session_data.get('show_answer') is not None:
+                st.session_state.show_answer = session_data['show_answer']
+            
+            if session_data.get('current_question_answered') is not None:
+                st.session_state.current_question_answered = session_data['current_question_answered']
+            
+            if session_data.get('session_progress'):
+                st.session_state.session_progress = session_data['session_progress']
+            
+            if session_data.get('dashboard_filter_active') is not None:
+                st.session_state.dashboard_filter_active = session_data['dashboard_filter_active']
+            
+            if session_data.get('dashboard_filter_type'):
+                st.session_state.dashboard_filter_type = session_data['dashboard_filter_type']
+            
+            # Restore UI state
+            last_filters = session_data.get('last_filters', {})
+            if 'practice_mode' in last_filters:
+                st.session_state.practice_mode_selector = last_filters['practice_mode']
+            if 'randomize' in last_filters:
+                st.session_state.randomize_questions = last_filters['randomize']
+            if 'enable_formatting' in last_filters:
+                st.session_state.enable_formatting = last_filters['enable_formatting']
+            
+            return True
+    except Exception as e:
+        print(f"Warning: Could not load session: {e}")
+    
+    return False
+
+
+def reset_persistent_session():
+    """Reset the current session and clear from database."""
+    session_id = get_session_id()
+    
+    # Clear from database
+    try:
+        clear_session(session_id)
+    except Exception as e:
+        print(f"Warning: Could not clear session from database: {e}")
+    
+    # Reset all problem statistics
+    try:
+        reset_all_problem_stats()
+        print("✅ Reset all problem statistics")
+    except Exception as e:
+        print(f"Warning: Could not reset problem statistics: {e}")
+    
+    # Clear from Streamlit session state
+    keys_to_clear = [
+        'current_question', 'question_history', 'current_question_index',
+        'show_answer', 'current_question_answered', 'session_progress', 
+        'dashboard_filter_active', 'dashboard_filter_type', 'preloaded_next_question', 
+        'fill_blanks_state', 'session_loaded'
+    ]
+    
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
 
 
 def is_valid_python(code: str) -> bool:
@@ -1033,46 +1240,146 @@ def main():
                                       value=True,
                                       help="Auto-format code display")
     
-    # Mobile-optimized sidebar
+    # Simplified sidebar for better Streamlit performance
     with st.sidebar:
-        st.markdown("### ➕ Add Question")
+        # Clickable progress stats
+        dashboard_stats = get_cached_dashboard_stats()
+        st.markdown("### 📊 Progress")
         
+        # Top row: Total and Mastered
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button(f"**Total**\n{dashboard_stats['total']}", use_container_width=True, key="filter_total"):
+                st.session_state.dashboard_filter_active = True
+                st.session_state.dashboard_filter_type = "All"
+                # Reset seen questions for new filter
+                st.session_state.seen_in_current_filter = set()
+                st.rerun()
+        with col2:
+            if st.button(f"**Mastered**\n{dashboard_stats['mastered']}", use_container_width=True, key="filter_mastered"):
+                st.session_state.dashboard_filter_active = True
+                st.session_state.dashboard_filter_type = "Mastered"
+                # Reset seen questions for new filter
+                st.session_state.seen_in_current_filter = set()
+                st.rerun()
+        
+        # Bottom row: Unseen and Needs Review
+        col3, col4 = st.columns(2)
+        with col3:
+            if st.button(f"**Unseen**\n{dashboard_stats['not_seen_yet']}", use_container_width=True, key="filter_unseen"):
+                st.session_state.dashboard_filter_active = True
+                st.session_state.dashboard_filter_type = "New"
+                # Reset seen questions for new filter
+                st.session_state.seen_in_current_filter = set()
+                st.rerun()
+        with col4:
+            if st.button(f"**Review**\n{dashboard_stats['needs_review']}", use_container_width=True, key="filter_review"):
+                st.session_state.dashboard_filter_active = True
+                st.session_state.dashboard_filter_type = "Needs Review"
+                # Reset seen questions for new filter
+                st.session_state.seen_in_current_filter = set()
+                st.rerun()
+        
+        # Show active filter and clear button
+        if st.session_state.get('dashboard_filter_active', False):
+            filter_type = st.session_state.get('dashboard_filter_type', 'All')
+            st.caption(f"🔍 Filtered by: {filter_type}")
+            if st.button("❌ Clear Filter", use_container_width=True, key="clear_dashboard_filter"):
+                st.session_state.dashboard_filter_active = False
+                st.session_state.dashboard_filter_type = None
+                st.rerun()
+        
+        # Simple search with caching
+        st.markdown("### 🔍 Search")
+        search_query = st.text_input("Search problems:", placeholder="e.g., Two Sum", key="sidebar_search")
+        if search_query:
+            # Use cached search results for better performance
+            search_results = get_cached_search_results(search_query)
+            search_questions = [convert_db_problem_to_question_format(p) for p in search_results]
+            if search_questions:
+                st.info(f"Found {len(search_questions)} matches")
+                if st.button("Use Search Results", use_container_width=True):
+                    filtered_questions = search_questions
+            else:
+                st.warning("No matches found")
+        
+        # Simple filters
+        st.markdown("### 🔍 Filters")
+        difficulty_options = ["All", "Easy", "Medium", "Hard"]
+        selected_difficulty = st.selectbox("Difficulty", difficulty_options, key="filter_difficulty")
+        
+        category_options = ["All"] + all_categories
+        selected_category = st.selectbox("Category", category_options, key="filter_category")
+        
+        status_options = ["All", "New", "Needs Review", "Mastered"]
+        selected_status = st.selectbox("Status", status_options, key="filter_status")
+        
+        if all_tags:
+            selected_tags = st.multiselect("Tags:", sorted(all_tags), key="filter_tags")
+        else:
+            selected_tags = []
+        
+        # Simple add question form with code validation
+        st.markdown("### ➕ Add Question")
         with st.form("add_question"):
             title = st.text_input("Title", placeholder="e.g., Two Sum")
-            question = st.text_area("Question", placeholder="Problem description...", height=100)
-            answer = st.text_area("Solution", placeholder="Code solution with explanation...", height=120)
+            question = st.text_area("Question", placeholder="Problem description...", height=80)
+            answer = st.text_area("Solution", placeholder="Code solution...", height=100)
             
-            # Tags section
-            st.write("**Tags (optional):**")
-            
-            # Use the already calculated all_tags
+            # Enhanced code validation for new problems
+            if answer and answer.strip():
+                # Extract code from answer if it's in markdown format
+                code_snippet = extract_code_from_answer(answer) or answer.strip()
+                
+                # Comprehensive validation check
+                if code_snippet:
+                    try:
+                        validator = CodeValidator(ValidationLevel.COMPREHENSIVE)
+                        result = validator.validate_and_fix_code(code_snippet, debug=False)
+                        
+                        if result.is_valid:
+                            st.success("✅ Code syntax is valid and properly formatted")
+                            if result.warnings:
+                                st.info(f"ℹ️ Warnings: {', '.join(result.warnings)}")
+                        else:
+                            st.error(f"❌ Code has syntax errors: {', '.join(result.errors)}")
+                            if st.button("🔧 Preview Fixed Code", key="preview_fix"):
+                                st.code(result.fixed_code, language="python")
+                                if result.warnings:
+                                    st.info(f"Warnings: {', '.join(result.warnings)}")
+                                if result.suggestions:
+                                    st.info(f"Suggestions: {', '.join(result.suggestions)}")
+                    except Exception as e:
+                        st.error(f"Validation error: {str(e)}")
+                        # Fallback to basic validation
+                        is_valid = is_valid_python(code_snippet)
+                        if is_valid:
+                            st.success("✅ Code syntax is valid (basic check)")
+                        else:
+                            st.warning("⚠️ Code has syntax issues - will be auto-fixed when saved")
             
             col1, col2 = st.columns(2)
             with col1:
                 difficulty = st.selectbox("Difficulty", ["", "Easy", "Medium", "Hard"], key="add_problem_difficulty")
             with col2:
                 category_options = ["", "Array", "Hash Map", "Two Pointers", "Binary Search", "Tree", "Graph", "Dynamic Programming", "Greedy", "Sorting"]
-                # Add existing custom categories
                 for tag in sorted(all_tags):
                     if tag not in category_options and tag not in ["Easy", "Medium", "Hard"]:
                         category_options.append(tag)
                 category = st.selectbox("Category", category_options, key="add_problem_category")
             
-            # Custom tags with ability to add new ones
-            st.write("**Additional Tags:**")
             existing_tags = sorted([tag for tag in all_tags if tag not in ["Easy", "Medium", "Hard"]])
             if existing_tags:
-                additional_tags = st.multiselect("Select existing tags:", existing_tags)
+                additional_tags = st.multiselect("Tags:", existing_tags)
             else:
                 additional_tags = []
             
-            new_tag = st.text_input("Add new tag:", placeholder="Type a new tag name")
+            new_tag = st.text_input("New tag:", placeholder="Type new tag")
             if new_tag and new_tag.strip():
                 additional_tags.append(new_tag.strip())
             
             if st.form_submit_button("Add Question", use_container_width=True):
                 if title and question and answer:
-                    # Build tags list
                     tags = []
                     if difficulty:
                         tags.append(difficulty)
@@ -1081,7 +1388,7 @@ def main():
                     if additional_tags:
                         tags.extend(additional_tags)
                     
-                    # Add to database
+                    # Backend will automatically format the code
                     problem_id = add_custom_problem(
                         title=title,
                         difficulty=difficulty,
@@ -1091,83 +1398,10 @@ def main():
                         tags=tags
                     )
                     
-                    st.success(f"Question added! (ID: {problem_id})")
+                    st.success(f"Added! (ID: {problem_id})")
                     st.rerun()
                 else:
-                    st.error("Please fill in all fields")
-        
-        st.markdown("---")
-        st.write(f"**Total Questions:** {len(questions)}")
-        
-        # Progress Dashboard
-        st.subheader("📊 Progress Dashboard")
-        
-        # Calculate overall stats
-        total_problems = len(db_problems)
-        reviewed_problems = sum(1 for p in db_problems if get_problem_stats(p['id'])['times_reviewed'] > 0)
-        mastered_problems = sum(1 for p in db_problems if get_problem_stats(p['id'])['success_rate'] >= 70)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Problems", total_problems)
-        with col2:
-            st.metric("Reviewed", reviewed_problems)
-        with col3:
-            st.metric("Mastered", mastered_problems)
-        
-        # Progress by category
-        if st.checkbox("Show Progress by Category"):
-            category_stats = {}
-            for problem in db_problems:
-                category = problem['category']
-                if category not in category_stats:
-                    category_stats[category] = {'total': 0, 'reviewed': 0, 'mastered': 0}
-                
-                category_stats[category]['total'] += 1
-                stats = get_problem_stats(problem['id'])
-                if stats['times_reviewed'] > 0:
-                    category_stats[category]['reviewed'] += 1
-                if stats['success_rate'] >= 70:
-                    category_stats[category]['mastered'] += 1
-            
-            for category, stats in category_stats.items():
-                progress = stats['reviewed'] / stats['total'] * 100
-                st.write(f"**{category}:** {stats['reviewed']}/{stats['total']} ({progress:.1f}%)")
-        
-        # Search functionality
-        st.subheader("🔍 Search Problems")
-        search_query = st.text_input("Search by title or description:", placeholder="e.g., Two Sum")
-        if search_query:
-            search_results = search_problems(search_query)
-            search_questions = [convert_db_problem_to_question_format(p) for p in search_results]
-            if search_questions:
-                st.info(f"Found {len(search_questions)} matching problems")
-                if st.button("Use Search Results", use_container_width=True):
-                    filtered_questions = search_questions
-            else:
-                st.warning("No problems found matching your search.")
-        
-        # Mobile-friendly filtering
-        st.markdown("### 🔍 Filters")
-        
-        # Compact difficulty filter
-        difficulty_options = ["All", "Easy", "Medium", "Hard"]
-        selected_difficulty = st.selectbox("Difficulty", difficulty_options, key="filter_difficulty")
-        
-        # Category filter
-        category_options = ["All"] + all_categories
-        selected_category = st.selectbox("Category", category_options, key="filter_category")
-        
-        # Status filter (based on review history)
-        status_options = ["All", "New", "Needs Review", "Mastered"]
-        selected_status = st.selectbox("Review Status", status_options, key="filter_status")
-        
-        # Tag filtering (additional tags)
-        st.subheader("🏷️ Additional Tags")
-        if all_tags:
-            selected_tags = st.multiselect("Select tags to filter:", sorted(all_tags))
-        else:
-            selected_tags = []
+                    st.error("Please fill all fields")
         
     
         # Apply filters using database functions
@@ -1180,15 +1414,19 @@ def main():
         # Convert filtered database problems to question format
         filtered_questions = [convert_db_problem_to_question_format(p) for p in filtered_db_problems]
         
-        # Apply status filter (post-processing)
-        if selected_status != "All":
-            if selected_status == "New":
+        # Apply status filter (post-processing) - check both sidebar filter and dashboard filter
+        status_to_filter = selected_status
+        if st.session_state.get('dashboard_filter_active', False):
+            status_to_filter = st.session_state.get('dashboard_filter_type', selected_status)
+        
+        if status_to_filter != "All":
+            if status_to_filter == "New":
                 # Problems that haven't been reviewed
                 filtered_questions = [q for q in filtered_questions if get_problem_stats(q['id'])['times_reviewed'] == 0]
-            elif selected_status == "Needs Review":
+            elif status_to_filter == "Needs Review":
                 # Problems that have been reviewed but have low success rate
                 filtered_questions = [q for q in filtered_questions if get_problem_stats(q['id'])['success_rate'] < 70]
-            elif selected_status == "Mastered":
+            elif status_to_filter == "Mastered":
                 # Problems with high success rate
                 filtered_questions = [q for q in filtered_questions if get_problem_stats(q['id'])['success_rate'] >= 70]
     
@@ -1204,7 +1442,14 @@ def main():
             st.warning("No questions available. Add some questions in the sidebar!")
         return
     
-    # Initialize session state
+    # Initialize session state with persistence support
+    session_loaded = False
+    if 'session_loaded' not in st.session_state:
+        # Try to load persistent session on first run
+        session_loaded = load_persistent_session()
+        st.session_state.session_loaded = True
+    
+    # Initialize missing session state values
     if 'show_answer' not in st.session_state:
         st.session_state.show_answer = False
     if 'current_question' not in st.session_state:
@@ -1213,6 +1458,20 @@ def main():
         st.session_state.question_history = []
     if 'current_question_index' not in st.session_state:
         st.session_state.current_question_index = -1
+    if 'current_question_answered' not in st.session_state:
+        st.session_state.current_question_answered = False
+    
+    # Ensure current question is in the filtered set
+    current_question_id = st.session_state.current_question.get('id')
+    if current_question_id and not any(q['id'] == current_question_id for q in filtered_questions):
+        # Current question is not in filtered set, pick a new one
+        st.session_state.current_question = random.choice(filtered_questions)
+        st.session_state.show_answer = False
+        st.session_state.current_question_answered = False
+    
+    # If session was loaded, show a welcome back message
+    if session_loaded:
+        st.success("🎉 Welcome back! Your session has been restored.", icon="🔄")
     
     question_data = st.session_state.current_question
     
@@ -1310,22 +1569,8 @@ def main():
                         if char in code_snippet:
                             st.write(f"  - Found '{char}' → replaced with valid Python")
             
-            # Batch operations
-            st.markdown("**Batch Operations:**")
-            col3, col4 = st.columns(2)
-            
-            with col3:
-                if st.button("🔄 Fix Indentation Only", use_container_width=True):
-                    fixed_code = fix_code_indentation(code_snippet)
-                    st.markdown("**Indentation Fixed:**")
-                    st.code(fixed_code, language="python")
-            
-            with col4:
-                if st.button("🧹 Clean Unicode Only", use_container_width=True):
-                    from code_validator import clean_unicode_characters
-                    cleaned_code = clean_unicode_characters(code_snippet)
-                    st.markdown("**Unicode Cleaned:**")
-                    st.code(cleaned_code, language="python")
+            # Note: Code validation and formatting now happens automatically in the backend
+            st.info("ℹ️ Code validation and formatting happens automatically when problems are saved.")
             
             # Show raw code for comparison
             with st.expander("📄 Show Raw Code"):
@@ -1344,53 +1589,9 @@ def main():
         else:
             st.warning("No code found in current question")
         
-        # Batch cleaning tools
+        # Batch cleaning removed - code validation now happens automatically in backend
         st.markdown("---")
-        st.subheader("🧹 Batch Cleaning Tools")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🔧 Clean All Problems", use_container_width=True):
-                from batch_code_cleaner import DatabaseCodeCleaner
-                
-                with st.spinner("Cleaning all problems..."):
-                    cleaner = DatabaseCodeCleaner()
-                    results = cleaner.clean_all_problems(dry_run=True)  # Start with dry run
-                    
-                    st.markdown("**Cleaning Results (Dry Run):**")
-                    st.write(f"📊 **Total Problems:** {results['total_problems']}")
-                    st.write(f"🔄 **Problems to Clean:** {results['cleaned_problems']}")
-                    st.write(f"❌ **Problems with Errors:** {results['problems_with_errors']}")
-                    st.write(f"⚠️ **Problems with Warnings:** {results['problems_with_warnings']}")
-                    st.write(f"✅ **Success Rate:** {results['success_rate']:.1f}%")
-                    
-                    if results['validation_errors']:
-                        st.markdown("**Errors Found:**")
-                        for error in results['validation_errors'][:5]:  # Show first 5
-                            st.write(f"- {error}")
-                        if len(results['validation_errors']) > 5:
-                            st.write(f"... and {len(results['validation_errors']) - 5} more")
-                    
-                    # Ask if user wants to proceed with actual cleaning
-                    if results['cleaned_problems'] > 0:
-                        if st.button("✅ Proceed with Cleaning", use_container_width=True):
-                            with st.spinner("Actually cleaning problems..."):
-                                actual_results = cleaner.clean_all_problems(dry_run=False)
-                                st.success(f"✅ Successfully cleaned {actual_results['cleaned_problems']} problems!")
-                                st.rerun()
-        
-        with col2:
-            if st.button("📊 Generate Cleaning Report", use_container_width=True):
-                from batch_code_cleaner import DatabaseCodeCleaner
-                
-                with st.spinner("Generating cleaning report..."):
-                    cleaner = DatabaseCodeCleaner()
-                    results = cleaner.clean_all_problems(dry_run=True)
-                    report = cleaner.generate_cleaning_report(results)
-                    
-                    st.markdown("**Cleaning Report:**")
-                    st.markdown(report)
+        st.info("ℹ️ **Code validation and formatting is now handled automatically** when problems are added or updated. No manual cleaning needed!")
     
     # Create responsive two-column layout
     col_main, col_meta = st.columns([3, 1], gap="large")
@@ -1409,6 +1610,22 @@ def main():
             ">
                 <h2 style="margin: 0; color: #FF6B6B; font-size: 1.8rem;">❓ {question_data['title']}</h2>
             """, unsafe_allow_html=True)
+            
+            # Show position based on mode
+            if randomize_questions:
+                # In random mode, show session progress instead of list position
+                session_position = len(st.session_state.question_history) + 1
+                st.caption(f"🎲 Random mode • Question {session_position} of session")
+            else:
+                # In sequential mode, show position in filtered list
+                current_question_id = question_data.get('id')
+                current_position = 1
+                if current_question_id:
+                    for i, q in enumerate(filtered_questions):
+                        if q['id'] == current_question_id:
+                            current_position = i + 1
+                            break
+                st.caption(f"📍 Position: {current_position} of {len(filtered_questions)} in current filter")
             
             # Problem metadata in a clean row
             meta_col1, meta_col2, meta_col3 = st.columns([1, 1, 2])
@@ -1501,10 +1718,35 @@ def main():
         if 'session_progress' not in st.session_state:
             st.session_state.session_progress = {'current': 1, 'total': len(filtered_questions)}
         
-        progress = st.session_state.session_progress['current'] / st.session_state.session_progress['total']
-        st.markdown("**Session Progress**")
-        st.progress(progress)
-        st.caption(f"Question {st.session_state.session_progress['current']} of {st.session_state.session_progress['total']}")
+        # Update total to match filtered questions and reset current position if filter changed
+        if st.session_state.session_progress['total'] != len(filtered_questions):
+            st.session_state.session_progress['total'] = len(filtered_questions)
+            st.session_state.session_progress['current'] = 1
+        
+        # Calculate progress based on mode
+        if randomize_questions:
+            # In random mode, show session progress
+            session_position = len(st.session_state.question_history) + 1
+            # Estimate total based on filtered questions (could be infinite in random mode)
+            estimated_total = len(filtered_questions) if len(filtered_questions) > 0 else 1
+            progress = min(session_position / estimated_total, 1.0)  # Cap at 100%
+            st.markdown("**Session Progress**")
+            st.progress(progress)
+            st.caption(f"Question {session_position} of session (🎲 Random)")
+        else:
+            # In sequential mode, show position in filtered list
+            current_question_id = st.session_state.current_question.get('id')
+            current_position = 1
+            if current_question_id:
+                for i, q in enumerate(filtered_questions):
+                    if q['id'] == current_question_id:
+                        current_position = i + 1
+                        break
+            
+            progress = current_position / len(filtered_questions) if len(filtered_questions) > 0 else 0
+            st.markdown("**Session Progress**")
+            st.progress(progress)
+            st.caption(f"Question {current_position} of {len(filtered_questions)}")
         
         # Session info with icons
         st.markdown("---")
@@ -1519,19 +1761,56 @@ def main():
         st.markdown("---")
         st.markdown("**🎯 Actions**")
         
-        # Success/Failure tracking (only show after answer is revealed)
-        if st.session_state.get('show_answer', False):
-            st.markdown("**How did you do?**")
+        # Confidence tracking (always visible, not just after revealing solution)
+        if not st.session_state.get('current_question_answered', False):
+            st.markdown("**How confident are you?**")
             col_success, col_fail = st.columns(2)
             with col_success:
-                if st.button("✅ Got it!", use_container_width=True):
+                if st.button("✅ Got it!", use_container_width=True, type="primary"):
+                    # Mark as answered to prevent multiple clicks
+                    st.session_state.current_question_answered = True
+                    
+                    # Update problem stats
                     update_problem_stats(question_data['id'], success=True)
-                    st.success("Great job! 🎉")
+                    
+                    # Clear related caches to show updated stats immediately
+                    get_cached_problem_stats.clear()
+                    get_cached_dashboard_stats.clear()
+                    
+                    # Automatically move to next problem
+                    move_to_next_problem(filtered_questions, randomize_questions)
+                    
+                    # Save persistent session
+                    save_persistent_session()
+                    
+                    # Auto-scroll to top for next problem
+                    auto_scroll_to_top()
+                    
+                    st.success("Great job! 🎉 Moving to next problem...")
                     st.rerun()
+                    
             with col_fail:
                 if st.button("❌ Need review", use_container_width=True):
+                    # Mark as answered to prevent multiple clicks
+                    st.session_state.current_question_answered = True
+                    
+                    # Update problem stats
                     update_problem_stats(question_data['id'], success=False)
-                    st.info("No worries! Practice makes perfect 💪")
+                    
+                    # Clear related caches to show updated stats immediately
+                    get_cached_problem_stats.clear()
+                    get_cached_dashboard_stats.clear()
+                    
+                    # Automatically move to next problem
+                    move_to_next_problem(filtered_questions, randomize_questions)
+                    
+                    # Save persistent session
+                    save_persistent_session()
+                    
+                    # Auto-scroll to top for next problem
+                    auto_scroll_to_top()
+                    
+                    st.info("No worries! Practice makes perfect 💪 Moving to next problem...")
                     st.rerun()
         
         # Navigation buttons
@@ -1551,8 +1830,24 @@ def main():
                 st.button("⬅️ Back", use_container_width=True, disabled=True)
         
         with col_next:
+            # Check if we can go to next question
+            can_go_next = True
+            if randomize_questions:
+                # In random mode, check if all questions in filtered set have been seen
+                if 'seen_in_current_filter' not in st.session_state:
+                    st.session_state.seen_in_current_filter = set()
+                
+                current_id = st.session_state.current_question['id']
+                st.session_state.seen_in_current_filter.add(current_id)
+                
+                unseen_questions = [q for q in filtered_questions if q['id'] not in st.session_state.seen_in_current_filter]
+                can_go_next = len(unseen_questions) > 0
+            else:
+                # In sequential mode, always allow next (it cycles)
+                can_go_next = True
+            
             # Next question button
-            if st.button("➡️ Next", use_container_width=True, type="primary"):
+            if st.button("➡️ Next", use_container_width=True, type="primary", disabled=not can_go_next):
                 # Add current question to history before moving to next
                 if st.session_state.current_question_index == -1:
                     # First question, add to history
@@ -1564,7 +1859,23 @@ def main():
                 
                 # Get next question based on randomization setting
                 if randomize_questions:
-                    next_question = random.choice(filtered_questions)
+                    # Track seen questions in current filtered session
+                    if 'seen_in_current_filter' not in st.session_state:
+                        st.session_state.seen_in_current_filter = set()
+                    
+                    # Add current question to seen set
+                    current_id = st.session_state.current_question['id']
+                    st.session_state.seen_in_current_filter.add(current_id)
+                    
+                    # Find unseen questions in filtered set
+                    unseen_questions = [q for q in filtered_questions if q['id'] not in st.session_state.seen_in_current_filter]
+                    
+                    if unseen_questions:
+                        next_question = random.choice(unseen_questions)
+                    else:
+                        # All questions seen, reset and pick randomly
+                        st.session_state.seen_in_current_filter = set()
+                        next_question = random.choice(filtered_questions)
                 else:
                     # Sequential order - get next question in filtered list
                     current_id = st.session_state.current_question['id']
@@ -1584,12 +1895,22 @@ def main():
         
         with col_reset:
             # Reset navigation button
-            if st.button("🔄 Reset", use_container_width=True):
+            if st.button("🔄 Reset Session", use_container_width=True):
+                # Reset persistent session
+                reset_persistent_session()
+                
+                # Clear cached dashboard stats to show updated progress immediately
+                get_cached_dashboard_stats.clear()
+                get_cached_problem_stats.clear()
+                
+                # Initialize fresh session
                 st.session_state.question_history = []
                 st.session_state.current_question_index = -1
                 st.session_state.current_question = random.choice(filtered_questions)
                 st.session_state.show_answer = False
-                st.session_state.session_progress['current'] = 1
+                st.session_state.current_question_answered = False
+                st.session_state.session_progress = {'current': 1, 'total': len(filtered_questions)}
+                st.success("🔄 Session reset! All progress cleared. Starting fresh.")
                 st.rerun()
     
     # Edit question button (moved to left column)
