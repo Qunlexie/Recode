@@ -20,9 +20,7 @@ st.set_page_config(
 )
 import random
 import json
-import subprocess
 import sys
-import tempfile
 import os
 import re
 import ast
