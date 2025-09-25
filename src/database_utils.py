@@ -7,37 +7,96 @@ Handles all database operations for problems and user stats.
 import sqlite3
 import json
 import random
+import os
 from typing import List, Dict, Optional, Tuple
 
-DATABASE_PATH = 'recode.db'
+# Get the directory where this file is located
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE_PATH = os.path.join(BASE_DIR, 'recode.db')
 
 def get_connection():
     """Get database connection."""
+    # Check if database exists, if not, create it
+    if not os.path.exists(DATABASE_PATH):
+        print(f"Database not found at {DATABASE_PATH}. Creating new database...")
+        conn = sqlite3.connect(DATABASE_PATH)
+        create_database_schema(conn)
+        return conn
     return sqlite3.connect(DATABASE_PATH)
+
+def create_database_schema(conn):
+    """Create the database schema if it doesn't exist."""
+    cursor = conn.cursor()
+    
+    # Create problems table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS problems (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            question TEXT,
+            answer TEXT,
+            difficulty TEXT,
+            category TEXT,
+            tags TEXT,
+            leetcode_link TEXT,
+            leetcode_id INTEGER,
+            key_idea TEXT,
+            explanation TEXT,
+            time_complexity TEXT,
+            space_complexity TEXT
+        )
+    ''')
+    
+    # Create user_stats table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            problem_id INTEGER,
+            attempts INTEGER DEFAULT 0,
+            correct INTEGER DEFAULT 0,
+            last_attempt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (problem_id) REFERENCES problems (id)
+        )
+    ''')
+    
+    conn.commit()
+    print("Database schema created successfully!")
+
 
 def get_all_problems() -> List[Dict]:
     """Get all problems from the database."""
-    conn = get_connection()
-    conn.row_factory = sqlite3.Row  # Enable column access by name
-    cur = conn.cursor()
-    
-    cur.execute('''
-        SELECT * FROM problems 
-        ORDER BY category, title
-    ''')
-    
-    problems = []
-    for row in cur.fetchall():
-        problem = dict(row)
-        # Parse tags JSON
-        if problem['tags']:
-            problem['tags'] = json.loads(problem['tags'])
-        else:
-            problem['tags'] = []
-        problems.append(problem)
-    
-    conn.close()
-    return problems
+    try:
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row  # Enable column access by name
+        cur = conn.cursor()
+        
+        cur.execute('''
+            SELECT * FROM problems 
+            ORDER BY category, title
+        ''')
+        
+        problems = []
+        for row in cur.fetchall():
+            problem = dict(row)
+            # Parse tags JSON
+            if problem['tags']:
+                try:
+                    problem['tags'] = json.loads(problem['tags'])
+                except json.JSONDecodeError:
+                    problem['tags'] = []
+            else:
+                problem['tags'] = []
+            problems.append(problem)
+        
+        conn.close()
+        return problems
+        
+    except sqlite3.Error as e:
+        print(f"Database error in get_all_problems: {e}")
+        return []
+    except Exception as e:
+        print(f"Unexpected error in get_all_problems: {e}")
+        return []
 
 def get_random_problem() -> Optional[Dict]:
     """Get a random problem from the database."""
