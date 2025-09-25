@@ -142,19 +142,14 @@ def get_session_id():
     import hashlib
     import time
     
-    # Try to get session ID from browser storage using JavaScript
-    session_id = st.query_params.get("session_id", None)
-    
-    if not session_id:
+    # Use session state to store session ID (more compatible approach)
+    if 'session_id' not in st.session_state:
         # Generate new session ID based on timestamp and random seed
         timestamp = str(time.time())
         random_seed = str(random.randint(1000, 9999))
-        session_id = hashlib.md5((timestamp + random_seed).encode()).hexdigest()[:16]
-        
-        # Set as query param to maintain across refreshes
-        st.query_params["session_id"] = session_id
+        st.session_state.session_id = hashlib.md5((timestamp + random_seed).encode()).hexdigest()[:16]
     
-    return session_id
+    return st.session_state.session_id
 
 
 def save_persistent_session():
