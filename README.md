@@ -2,17 +2,17 @@
 
 A streamlined flashcard app for coding interview practice featuring the complete **NeetCode 150** problem set.
 
-## Quick Start
+## 🚀 Quick Start
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
 # Run the app
-streamlit run run.py
+cd src && python3 -m streamlit run app.py --server.port 8500
 ```
 
-Access at `http://localhost:8501`
+Access at `http://localhost:8500`
 
 ## Features
 
@@ -31,11 +31,12 @@ Recode/
 │   ├── database_setup.py       # NeetCode 150 import script
 │   ├── database_utils.py       # Database operations
 │   ├── code_validator.py       # Code validation & formatting
+│   ├── code_masking.py         # Smart Fill-in-the-Blanks masking
+│   ├── session_manager.py      # Dynamic session management
 │   └── batch_code_cleaner.py   # Batch cleaning utilities
 ├── .streamlit/config.toml     # Streamlit configuration
-├── recode.db                  # SQLite database (142 problems)
+├── recode.db                  # SQLite database (150 problems)
 ├── requirements.txt           # Dependencies
-├── run.py                     # Entry point
 └── README.md                  # This file
 ```
 
