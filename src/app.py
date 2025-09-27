@@ -513,7 +513,7 @@ def render_flashcard(question_data, enable_formatting=True):
                         # Enhanced code display with container
                         st.markdown("**💻 Solution Code:**")
                         
-                        # Show validation status with better styling
+                        # Show validation status with simple styling
                         if not is_valid:
                             st.markdown("""
                             <div style="
@@ -526,236 +526,6 @@ def render_flashcard(question_data, enable_formatting=True):
                                 ⚠️ <strong>Code Formatting Notice:</strong> Some formatting issues detected - displaying best version
                             </div>
                             """, unsafe_allow_html=True)
-                            
-                            # Add a diagnostic button for problematic code
-                            if st.button("🔍 Diagnose Formatting Issue", key="diagnose_formatting"):
-                                st.markdown("**Diagnostic Information:**")
-                                
-                                # Show original code
-                                st.markdown("**Original Code:**")
-                                st.code(code_snippet, language="python")
-                                
-                                # Show formatted code
-                                st.markdown("**Formatted Code:**")
-                                st.code(formatted_code, language="python")
-                                
-                                # Try to identify the specific issue
-                                syntax_error = get_python_syntax_error(formatted_code)
-                                if syntax_error == "No syntax errors":
-                                    st.success("✅ Formatted code is actually valid!")
-                                else:
-                                    st.error(f"❌ Syntax Error: {syntax_error}")
-                                
-                                # Also check original code
-                                original_error = get_python_syntax_error(code_snippet)
-                                if original_error != "No syntax errors":
-                                    st.warning(f"⚠️ Original code also has issues: {original_error}")
-                                
-                                # Show character analysis
-                                st.markdown("**Character Analysis:**")
-                                st.write(f"Original length: {len(code_snippet)}")
-                                st.write(f"Formatted length: {len(formatted_code)}")
-                                st.write(f"Has Unicode arrows (→): {'→' in code_snippet}")
-                                st.write(f"Has Unicode symbols (≠): {'≠' in code_snippet}")
-                                st.write(f"Has Unicode symbols (≤): {'≤' in code_snippet}")
-                                st.write(f"Has Unicode symbols (≥): {'≥' in code_snippet}")
-                                
-                                # Quick fix suggestions
-                                st.markdown("**Quick Fix Suggestions:**")
-                                if '→' in code_snippet:
-                                    st.info("💡 Found Unicode arrows (→) - these should be converted to ->")
-                                if '≠' in code_snippet:
-                                    st.info("💡 Found Unicode not-equals (≠) - these should be converted to !=")
-                                if '≤' in code_snippet or '≥' in code_snippet:
-                                    st.info("💡 Found Unicode comparison symbols (≤, ≥) - these should be converted to <=, >=")
-                                
-                                # Check for other common issues
-                                st.markdown("**Code Structure Analysis:**")
-                                
-                                # Check for incomplete functions
-                                if 'def ' in code_snippet and ':' not in code_snippet:
-                                    st.warning("⚠️ Found function definitions without colons")
-                                
-                                # Check for unbalanced brackets
-                                open_parens = code_snippet.count('(')
-                                close_parens = code_snippet.count(')')
-                                open_braces = code_snippet.count('{')
-                                close_braces = code_snippet.count('}')
-                                open_brackets = code_snippet.count('[')
-                                close_brackets = code_snippet.count(']')
-                                
-                                if abs(open_parens - close_parens) > 0:
-                                    st.warning(f"⚠️ Unbalanced parentheses: {open_parens} open, {close_parens} close")
-                                if abs(open_braces - close_braces) > 0:
-                                    st.warning(f"⚠️ Unbalanced braces: {open_braces} open, {close_braces} close")
-                                if abs(open_brackets - close_brackets) > 0:
-                                    st.warning(f"⚠️ Unbalanced brackets: {open_brackets} open, {close_brackets} close")
-                                
-                                # Check for incomplete lines
-                                lines = code_snippet.split('\n')
-                                incomplete_lines = []
-                                for i, line in enumerate(lines):
-                                    stripped = line.strip()
-                                    if stripped.endswith(('=', '+', '-', '*', '/', ',')) and not stripped.endswith(('==', '!=', '<=', '>=')):
-                                        incomplete_lines.append(f"Line {i+1}: {stripped}")
-                                
-                                if incomplete_lines:
-                                    st.warning("⚠️ Found potentially incomplete lines:")
-                                    for line in incomplete_lines:
-                                        st.write(f"  - {line}")
-                                
-                                # Check for missing imports
-                                if 'List[' in code_snippet or 'Optional[' in code_snippet:
-                                    if 'from typing import' not in code_snippet:
-                                        st.info("💡 Code uses typing hints but missing 'from typing import'")
-                                
-                                # Check for class vs function structure
-                                if 'def ' in code_snippet and not code_snippet.strip().startswith('class '):
-                                    st.info("💡 Code has functions but no class wrapper - may need 'class Solution:'")
-                                
-                                # Show what black actually changed
-                                if formatted_code != code_snippet:
-                                    st.markdown("**What Black Changed:**")
-                                    st.write("The formatted code is different from the original. This suggests black made formatting changes.")
-                                else:
-                                    st.markdown("**What Black Changed:**")
-                                    st.write("The formatted code is identical to the original. Black made no changes.")
-                                
-                                # Show a cleaned version
-                                cleaned_version = code_snippet
-                                for unicode_char, replacement in [('→', '->'), ('≠', '!='), ('≤', '<='), ('≥', '>=')]:
-                                    cleaned_version = cleaned_version.replace(unicode_char, replacement)
-                                
-                                if cleaned_version != code_snippet:
-                                    st.markdown("**Cleaned Version (Unicode replaced):**")
-                                    st.code(cleaned_version, language="python")
-                                    
-                                    cleaned_valid = is_valid_python(cleaned_version)
-                                    if cleaned_valid:
-                                        st.success("✅ Cleaned version is valid!")
-                                    else:
-                                        st.error(f"❌ Cleaned version still has issues: {get_python_syntax_error(cleaned_version)}")
-                                
-                                # Try a different approach - maybe the issue is with the validation function
-                                st.markdown("**Validation Test:**")
-                                try:
-                                    # Try parsing the formatted code directly
-                                    ast.parse(formatted_code)
-                                    st.success("✅ Formatted code parses successfully with ast.parse()")
-                                except SyntaxError as e:
-                                    st.error(f"❌ Formatted code fails ast.parse(): {str(e)}")
-                                    
-                                    # Parse the error message to find the problematic line
-                                    error_msg = str(e)
-                                    if "line" in error_msg:
-                                        try:
-                                            # Handle different error message formats
-                                            if "line" in error_msg and ")" in error_msg:
-                                                # Format: "expected an indented block (<unknown>, line 5)"
-                                                line_part = error_msg.split("line")[1].split(")")[0].strip()
-                                                line_num = int(line_part)
-                                            else:
-                                                # Format: "line 5: ..."
-                                                line_num = int(error_msg.split("line")[1].split()[0])
-                                            st.markdown("**Problematic Line Analysis:**")
-                                            st.write(f"Error on line {line_num}")
-                                            
-                                            # Show the problematic line and context
-                                            lines = formatted_code.split('\n')
-                                            if line_num <= len(lines):
-                                                st.write("**Problematic line:**")
-                                                st.code(lines[line_num - 1], language="python")
-                                                
-                                                # Show context (3 lines before and after)
-                                                start = max(0, line_num - 4)
-                                                end = min(len(lines), line_num + 3)
-                                                context_lines = lines[start:end]
-                                                st.write("**Context (with line numbers):**")
-                                                for i, line in enumerate(context_lines):
-                                                    line_num_display = start + i + 1
-                                                    if line_num_display == line_num:
-                                                        st.code(f"{line_num_display:3d} | ❌ {line}", language="text")
-                                                    else:
-                                                        st.code(f"{line_num_display:3d} |    {line}", language="text")
-                                                
-                                                # Analyze the problematic line
-                                                problem_line = lines[line_num - 1]
-                                                st.markdown("**Line Analysis:**")
-                                                if problem_line.strip().endswith(':'):
-                                                    st.warning("⚠️ Line ends with colon but next line may not be indented")
-                                                elif problem_line.strip().startswith(('def ', 'class ', 'if ', 'for ', 'while ', 'try:', 'except:', 'finally:', 'with ')):
-                                                    st.warning("⚠️ Control structure that expects indented block")
-                                                elif not problem_line.strip():
-                                                    st.warning("⚠️ Empty line where indented code is expected")
-                                                else:
-                                                    st.info(f"ℹ️ Line content: '{problem_line.strip()}'")
-                                                
-                                                # Provide quick fix suggestions
-                                                st.markdown("**Quick Fix Suggestions:**")
-                                                if problem_line.strip().endswith(':'):
-                                                    st.info("💡 **Fix:** Add indented code after the colon, or add `pass` if the block should be empty")
-                                                    st.code("    pass  # Add this after the colon", language="python")
-                                                elif problem_line.strip().startswith(('def ', 'class ')):
-                                                    st.info("💡 **Fix:** Add `pass` or proper function body after the definition")
-                                                    st.code("    pass  # Add this after the function definition", language="python")
-                                                elif not problem_line.strip():
-                                                    st.info("💡 **Fix:** Remove empty line or add proper indented code")
-                                                
-                                                # Show a potential fix
-                                                st.markdown("**Potential Fix:**")
-                                                fixed_lines = lines.copy()
-                                                if line_num <= len(fixed_lines):
-                                                    if fixed_lines[line_num - 1].strip().endswith(':'):
-                                                        # Add pass after colon
-                                                        fixed_lines.insert(line_num, "    pass")
-                                                    elif not fixed_lines[line_num - 1].strip():
-                                                        # Remove empty line
-                                                        fixed_lines.pop(line_num - 1)
-                                                
-                                                fixed_code = '\n'.join(fixed_lines)
-                                                st.code(fixed_code, language="python")
-                                                
-                                                # Test the fix
-                                                try:
-                                                    ast.parse(fixed_code)
-                                                    st.success("✅ Fixed code parses successfully!")
-                                                except SyntaxError as fix_error:
-                                                    st.error(f"❌ Fix didn't work: {str(fix_error)}")
-                                        except Exception as parse_error:
-                                            st.write("Could not parse line number from error message")
-                                            st.write(f"Error parsing: {parse_error}")
-                                            st.write(f"Full error message: {error_msg}")
-                                            
-                                            # Try alternative parsing methods
-                                            import re
-                                            line_match = re.search(r'line\s+(\d+)', error_msg)
-                                            if line_match:
-                                                line_num = int(line_match.group(1))
-                                                st.write(f"Found line number using regex: {line_num}")
-                                                
-                                                # Show the problematic line and context
-                                                lines = formatted_code.split('\n')
-                                                if line_num <= len(lines):
-                                                    st.write("**Problematic line:**")
-                                                    st.code(lines[line_num - 1], language="python")
-                                                    
-                                                    # Show context (3 lines before and after)
-                                                    start = max(0, line_num - 4)
-                                                    end = min(len(lines), line_num + 3)
-                                                    context_lines = lines[start:end]
-                                                    st.write("**Context (with line numbers):**")
-                                                    for i, line in enumerate(context_lines):
-                                                        line_num_display = start + i + 1
-                                                        if line_num_display == line_num:
-                                                            st.code(f"{line_num_display:3d} | ❌ {line}", language="text")
-                                                        else:
-                                                            st.code(f"{line_num_display:3d} |    {line}", language="text")
-                                
-                                # Check if the issue is with our validation function
-                                if is_valid_python(formatted_code):
-                                    st.info("ℹ️ Our validation function says it's valid, but we're seeing issues")
-                                else:
-                                    st.info("ℹ️ Our validation function correctly identified the issue")
                         
                         # Display the formatted Python code with enhanced styling
                         st.markdown("""
@@ -998,8 +768,8 @@ def render_enhanced_fill_blanks(question_data):
                     else:
                         st.error(f"❌ Expected: `{state['answers'][i]}`")
     
-    # Action buttons
-    col1, col2, col3 = st.columns([1, 1, 1])
+    # Action buttons (mobile-friendly)
+    col1, col2, col3 = st.columns([1, 1, 1], gap="small")
     
     with col1:
         if st.button("🔍 Check Answers", use_container_width=True, type="primary", key=f"check_{problem_id}_{state['session_info']['attempt_number']}"):
@@ -1140,6 +910,11 @@ def main():
             padding: 0.25rem;
         }
         
+        /* Better spacing for mobile columns */
+        .stColumns {
+            gap: 0.5rem;
+        }
+        
         /* Responsive headers */
         h1 { font-size: 1.75rem !important; }
         h2 { font-size: 1.5rem !important; }
@@ -1225,7 +1000,7 @@ def main():
     )
     
     # Mobile-friendly toggles in columns
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2, gap="small")
     with col1:
         randomize_questions = st.checkbox("🎲 Random", 
                                         value=True,
@@ -1321,37 +1096,18 @@ def main():
             question = st.text_area("Question", placeholder="Problem description...", height=80)
             answer = st.text_area("Solution", placeholder="Code solution...", height=100)
             
-            # Enhanced code validation for new problems
+            # Simple code validation for new problems
             if answer and answer.strip():
                 # Extract code from answer if it's in markdown format
                 code_snippet = extract_code_from_answer(answer) or answer.strip()
                 
-                # Comprehensive validation check
+                # Basic validation check
                 if code_snippet:
-                    try:
-                        validator = CodeValidator(ValidationLevel.COMPREHENSIVE)
-                        result = validator.validate_and_fix_code(code_snippet, debug=False)
-                        
-                        if result.is_valid:
-                            st.success("✅ Code syntax is valid and properly formatted")
-                            if result.warnings:
-                                st.info(f"ℹ️ Warnings: {', '.join(result.warnings)}")
-                        else:
-                            st.error(f"❌ Code has syntax errors: {', '.join(result.errors)}")
-                            if st.button("🔧 Preview Fixed Code", key="preview_fix"):
-                                st.code(result.fixed_code, language="python")
-                                if result.warnings:
-                                    st.info(f"Warnings: {', '.join(result.warnings)}")
-                                if result.suggestions:
-                                    st.info(f"Suggestions: {', '.join(result.suggestions)}")
-                    except Exception as e:
-                        st.error(f"Validation error: {str(e)}")
-                        # Fallback to basic validation
-                        is_valid = is_valid_python(code_snippet)
-                        if is_valid:
-                            st.success("✅ Code syntax is valid (basic check)")
-                        else:
-                            st.warning("⚠️ Code has syntax issues - will be auto-fixed when saved")
+                    is_valid = is_valid_python(code_snippet)
+                    if is_valid:
+                        st.success("✅ Code syntax is valid")
+                    else:
+                        st.info("ℹ️ Code will be automatically formatted when saved")
             
             col1, col2 = st.columns(2)
             with col1:
@@ -1470,126 +1226,8 @@ def main():
     
     question_data = st.session_state.current_question
     
-    # Add review status controls to sidebar
-    with st.sidebar:
-        st.markdown("---")
-        st.subheader("📝 Review Status Controls")
-        st.info("Change the review status of the current question at any time")
-        
-        # Get current question stats
-        current_stats = get_problem_stats(question_data['id'])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("✅ Mark as Mastered", use_container_width=True):
-                # Set success rate to 100% by adding successful reviews
-                update_problem_stats(question_data['id'], success=True)
-                st.success("Question marked as mastered! 🎉")
-                st.rerun()
-        
-        with col2:
-            if st.button("❌ Mark as Needs Review", use_container_width=True):
-                # Set success rate to 0% by adding failed reviews
-                update_problem_stats(question_data['id'], success=False)
-                st.info("Question marked as needs review 📚")
-                st.rerun()
-        
-        # Show current status
-        st.caption(f"**Current Status:** {current_stats['times_reviewed']} reviews, {current_stats['success_rate']:.0f}% success rate")
-        
-        # Enhanced Code Validation Tools
-        st.markdown("---")
-        st.subheader("🔧 Advanced Code Tools")
-        
-        code_snippet = extract_code_from_answer(question_data['answer'])
-        if code_snippet:
-            # Validation level selector
-            validation_level = st.selectbox(
-                "Validation Level",
-                ["Basic", "Strict", "Comprehensive"],
-                index=2,
-                help="Choose validation thoroughness",
-                key="validation_level"
-            )
-            
-            level_map = {
-                "Basic": ValidationLevel.BASIC,
-                "Strict": ValidationLevel.STRICT,
-                "Comprehensive": ValidationLevel.COMPREHENSIVE
-            }
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("🎨 Format & Validate", use_container_width=True):
-                    validator = CodeValidator(level_map[validation_level])
-                    result = validator.validate_and_fix_code(code_snippet, debug=False)
-
-                    st.markdown("**Validation Results:**")
-                    if result.is_valid:
-                        st.success("✅ Code is valid!")
-                    else:
-                        st.error(f"❌ Code has {len(result.errors)} errors")
-                        for error in result.errors:
-                            st.write(f"  - {error}")
-
-                    if result.warnings:
-                        st.warning(f"⚠️ {len(result.warnings)} warnings:")
-                        for warning in result.warnings:
-                            st.write(f"  - {warning}")
-
-                    st.markdown("**Cleaned Code:**")
-                    st.code(result.fixed_code, language="python")
-
-                    if result.suggestions:
-                        st.markdown("**Suggestions:**")
-                        for suggestion in result.suggestions:
-                            st.info(f"💡 {suggestion}")
-            
-            with col2:
-                if st.button("🔍 Debug Analysis", use_container_width=True):
-                    validator = CodeValidator(level_map[validation_level])
-                    result = validator.validate_and_fix_code(code_snippet, debug=True)
-                    
-                    # Show detailed analysis
-                    st.markdown("**Detailed Analysis:**")
-                    st.write(f"**Original Length:** {len(code_snippet)}")
-                    st.write(f"**Cleaned Length:** {len(result.fixed_code)}")
-                    st.write(f"**Code Changed:** {result.fixed_code != code_snippet}")
-                    
-                    # Show character analysis
-                    st.markdown("**Character Analysis:**")
-                    unicode_chars = ['→', '≤', '≥', '≠', '∞', '∅']
-                    for char in unicode_chars:
-                        if char in code_snippet:
-                            st.write(f"  - Found '{char}' → replaced with valid Python")
-            
-            # Note: Code validation and formatting now happens automatically in the backend
-            st.info("ℹ️ Code validation and formatting happens automatically when problems are saved.")
-            
-            # Show raw code for comparison
-            with st.expander("📄 Show Raw Code"):
-                st.markdown("**Raw Code from Database:**")
-                st.code(code_snippet, language="python")
-                
-                # Show character analysis
-                st.markdown("**Character Analysis:**")
-                st.write(f"Length: {len(code_snippet)}")
-                unicode_chars = ['→', '≤', '≥', '≠', '∞', '∅', '∈', '∉', '∧', '∨', '¬']
-                found_unicode = [char for char in unicode_chars if char in code_snippet]
-                if found_unicode:
-                    st.write(f"Found Unicode characters: {', '.join(found_unicode)}")
-                else:
-                    st.write("No problematic Unicode characters found")
-        else:
-            st.warning("No code found in current question")
-        
-        # Batch cleaning removed - code validation now happens automatically in backend
-        st.markdown("---")
-        st.info("ℹ️ **Code validation and formatting is now handled automatically** when problems are added or updated. No manual cleaning needed!")
-    
-    # Create responsive two-column layout
-    col_main, col_meta = st.columns([3, 1], gap="large")
+    # Create responsive two-column layout (mobile-friendly)
+    col_main, col_meta = st.columns([2, 1], gap="medium")
     
     with col_main:
         # Main problem container
@@ -1622,8 +1260,8 @@ def main():
                             break
                 st.caption(f"📍 Position: {current_position} of {len(filtered_questions)} in current filter")
             
-            # Problem metadata in a clean row
-            meta_col1, meta_col2, meta_col3 = st.columns([1, 1, 2])
+            # Problem metadata in a clean row (mobile-friendly)
+            meta_col1, meta_col2, meta_col3 = st.columns([1, 1, 1])
             
             with meta_col1:
                 # Display LeetCode link if available
@@ -1808,8 +1446,8 @@ def main():
                     st.info("No worries! Practice makes perfect 💪 Moving to next problem...")
                     st.rerun()
         
-        # Navigation buttons
-        col_back, col_next, col_reset = st.columns([1, 1, 1])
+        # Navigation buttons (mobile-friendly)
+        col_back, col_next, col_reset = st.columns([1, 1, 1], gap="small")
         
         with col_back:
             # Go back button (only show if there's history)
@@ -1908,18 +1546,12 @@ def main():
                 st.success("🔄 Session reset! All progress cleared. Starting fresh.")
                 st.rerun()
     
-    # Edit question button (moved to left column)
-    with col1:
-        if st.button("✏️ Edit This Question", use_container_width=True):
-            st.session_state.edit_mode = True
-            st.session_state.editing_question = question_data
-            st.rerun()
+    # Edit question button
+    if st.button("✏️ Edit This Question", use_container_width=True):
+        st.session_state.edit_mode = True
+        st.session_state.editing_question = question_data
+        st.rerun()
         
-        # Enrichment button
-        if st.button("✨ Improve This Problem", use_container_width=True):
-            st.session_state.enrich_mode = True
-            st.session_state.enriching_question = question_data
-            st.rerun()
     
     # Edit mode
     if st.session_state.get('edit_mode', False):
@@ -2006,91 +1638,6 @@ def main():
                     st.session_state.edit_mode = False
                     st.rerun()
     
-    # Enrichment mode
-    if st.session_state.get('enrich_mode', False):
-        enriching_question = st.session_state.enriching_question
-        
-        st.markdown("---")
-        st.subheader("✨ Improve Problem")
-        st.info("Help improve this problem by adding better examples, test cases, or explanations!")
-        
-        with st.form("enrich_question"):
-            st.write(f"**Current Problem:** {enriching_question['title']}")
-            
-            # Current content display
-            with st.expander("📝 Current Problem Content"):
-                st.write("**Description:**")
-                st.write(enriching_question['question'])
-                st.write("**Solution:**")
-                st.write(enriching_question['answer'])
-            
-            # Enrichment options
-            st.write("**What would you like to improve?**")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                improve_examples = st.checkbox("Add Better Examples")
-                improve_explanation = st.checkbox("Improve Explanation")
-            with col2:
-                improve_test_cases = st.checkbox("Add Test Cases")
-                improve_solution = st.checkbox("Improve Solution Code")
-            
-            # Input fields based on selections
-            new_examples = ""
-            new_explanation = ""
-            new_test_cases = ""
-            new_solution = ""
-            
-            if improve_examples:
-                new_examples = st.text_area("Better Examples:", 
-                    placeholder="Add more comprehensive examples with expected outputs...")
-            
-            if improve_explanation:
-                new_explanation = st.text_area("Improved Explanation:", 
-                    placeholder="Add step-by-step explanation or algorithm approach...")
-            
-            if improve_test_cases:
-                new_test_cases = st.text_area("Test Cases:", 
-                    placeholder="Add edge cases and test scenarios...")
-            
-            if improve_solution:
-                new_solution = st.text_area("Improved Solution:", 
-                    placeholder="Add better solution code with comments...")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.form_submit_button("💾 Save Improvements", use_container_width=True):
-                    # Update the problem with improvements
-                    updates = {}
-                    
-                    if new_examples:
-                        current_desc = enriching_question['question']
-                        updates['description'] = current_desc + f"\n\n**Additional Examples:**\n{new_examples}"
-                    
-                    if new_explanation:
-                        current_desc = updates.get('description', enriching_question['question'])
-                        updates['description'] = current_desc + f"\n\n**Explanation:**\n{new_explanation}"
-                    
-                    if new_test_cases:
-                        current_desc = updates.get('description', enriching_question['question'])
-                        updates['description'] = current_desc + f"\n\n**Test Cases:**\n{new_test_cases}"
-                    
-                    if new_solution:
-                        updates['solution_code'] = new_solution
-                    
-                    if updates:
-                        update_problem(enriching_question['id'], **updates)
-                        st.success("✨ Problem improved successfully!")
-                        st.session_state.enrich_mode = False
-                        st.rerun()
-                    else:
-                        st.warning("Please select at least one improvement option.")
-            
-            with col2:
-                if st.form_submit_button("❌ Cancel", use_container_width=True):
-                    st.session_state.enrich_mode = False
-                    st.rerun()
 
 
 # Run main function
